@@ -1,101 +1,17 @@
-import os
-import cv2
-import glob
+from nerf.colmap_provider import *
 import json
-import tqdm
-import random
-import numpy as np
-from scipy.spatial.transform import Slerp, Rotation
 
-import trimesh
+def read_cameras_json(json_path):
 
-import torch
-from torch.utils.data import DataLoader
+    with open(json_path) as f:
+        json_dict = json.load(f)
 
-from .utils import get_rays
-from .colmap_utils import *
-
-def rotmat(a, b):
-	a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
-	v = np.cross(a, b)
-	c = np.dot(a, b)
-	# handle exception for the opposite direction input
-	if c < -1 + 1e-10:
-		return rotmat(a + np.random.uniform(-1e-2, 1e-2, 3), b)
-	s = np.linalg.norm(v)
-	kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-	return np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2 + 1e-10))
-
-
-def center_poses(poses, pts3d=None, enable_cam_center=False):
-    
-    def normalize(v):
-        return v / (np.linalg.norm(v) + 1e-10)
-
-    if pts3d is None or enable_cam_center:
-        center = poses[:, :3, 3].mean(0)
-    else:
-        center = pts3d.mean(0)
+    return json_dict['frames']
+            
         
     
-    up = normalize(poses[:, :3, 1].mean(0)) # (3)
-    R = rotmat(up, [0, 0, 1])
-    R = np.pad(R, [0, 1])
-    R[-1, -1] = 1
-    
-    poses[:, :3, 3] -= center
-    poses_centered = R @ poses # (N_images, 4, 4)
 
-    if pts3d is not None:
-        pts3d_centered = (pts3d - center) @ R[:3, :3].T
-        # pts3d_centered = pts3d @ R[:3, :3].T - center
-        return poses_centered, pts3d_centered
-
-    return poses_centered
-
-
-def visualize_poses(poses, size=0.05, bound=1, points=None):
-    # poses: [B, 4, 4]
-
-    axes = trimesh.creation.axis(axis_length=4)
-    box = trimesh.primitives.Box(extents=[2*bound]*3).as_outline()
-    box.colors = np.array([[128, 128, 128]] * len(box.entities))
-    objects = [axes, box]
-
-    if bound > 1:
-        unit_box = trimesh.primitives.Box(extents=[2]*3).as_outline()
-        unit_box.colors = np.array([[128, 128, 128]] * len(unit_box.entities))
-        objects.append(unit_box)
-
-    for pose in poses:
-        # a camera is visualized with 8 line segments.
-        pos = pose[:3, 3]
-        a = pos + size * pose[:3, 0] + size * pose[:3, 1] - size * pose[:3, 2]
-        b = pos - size * pose[:3, 0] + size * pose[:3, 1] - size * pose[:3, 2]
-        c = pos - size * pose[:3, 0] - size * pose[:3, 1] - size * pose[:3, 2]
-        d = pos + size * pose[:3, 0] - size * pose[:3, 1] - size * pose[:3, 2]
-
-        dir = (a + b + c + d) / 4 - pos
-        dir = dir / (np.linalg.norm(dir) + 1e-8)
-        o = pos + dir * 3
-
-        segs = np.array([[pos, a], [pos, b], [pos, c], [pos, d], [a, b], [b, c], [c, d], [d, a], [pos, o]])
-        segs = trimesh.load_path(segs)
-        objects.append(segs)
-
-    if points is not None:
-        print('[visualize points]', points.shape, points.dtype, points.min(0), points.max(0))
-        colors = np.zeros((points.shape[0], 4), dtype=np.uint8)
-        colors[:, 2] = 255 # blue
-        colors[:, 3] = 30 # transparent
-        objects.append(trimesh.PointCloud(points, colors))
-
-    scene = trimesh.Scene(objects)
-    scene.set_camera(distance=bound, center=[0, 0, 0])
-    scene.show()
-
-
-class ColmapDataset:
+class LERFDataset:
     def __init__(self, opt, device, type='train', n_test=24):
         super().__init__()
         
@@ -117,100 +33,68 @@ class ColmapDataset:
             os.path.join(self.root_path, "sparse", "0"),
             os.path.join(self.root_path, "colmap"),
         ]
-        
-        self.colmap_path = None
-        for path in candidate_paths:
-            if os.path.exists(path):
-                self.colmap_path = path
-                break
+        self.json_path = os.path.join(self.root_path, 'transforms.json')
 
-        if self.colmap_path is None:
-            raise ValueError(f"Cannot find colmap sparse output under {self.root_path}, please run colmap first!")
-
-        camdata = read_cameras_binary(os.path.join(self.colmap_path, 'cameras.bin'))
+        camdata = read_cameras_json(self.json_path)
 
         # read image size (assume all images are of the same shape!)
-        self.H = int(round(camdata[1].height / self.downscale))
-        self.W = int(round(camdata[1].width / self.downscale))
-        print(f'[INFO] ColmapDataset: image H = {self.H}, W = {self.W}')
-
-        # read image paths
-        imdata = read_images_binary(os.path.join(self.colmap_path, "images.bin"))
-        imkeys = np.array(sorted(imdata.keys()))
-
-
-        img_names = [os.path.basename(imdata[k].name) for k in imkeys]
-        self.img_names = img_names
-
-        if self.opt.with_mask:
-            img_folder = os.path.join(self.root_path, "masks")
-            img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
-        else:
-            img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
-            if not os.path.exists(img_folder):
-                img_folder = os.path.join(self.root_path, "images")
-            img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
-            
+        self.H = int(round(camdata[0]['h'] / self.downscale))
+        self.W = int(round(camdata[0]['w'] / self.downscale))
         
 
+        # read image paths
+
+        img_names = np.array([i['file_path'] for i in camdata])
+        img_paths = np.array([os.path.join(self.root_path, name[2:]) for name in img_names])
+
+
         feature_folder = os.path.join(self.root_path, 'sam_features')
-        feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+        feature_paths = np.array([os.path.join(feature_folder, name.replace('jpg', 'npz') ) for name in img_names])
 
         # only keep existing images
         exist_mask = np.array([os.path.exists(f) for f in img_paths])
         print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
-        imkeys = imkeys[exist_mask]
         img_paths = img_paths[exist_mask]
         feature_paths = feature_paths[exist_mask]
 
         # read intrinsics
         intrinsics = []
-        for k in imkeys:
-            cam = camdata[imdata[k].camera_id]
-            if cam.model in ['SIMPLE_RADIAL', 'SIMPLE_PINHOLE']:
-                fl_x = fl_y = cam.params[0] / self.downscale
-                cx = cam.params[1] / self.downscale
-                cy = cam.params[2] / self.downscale
-            elif cam.model in ['PINHOLE', 'OPENCV']:
-                fl_x = cam.params[0] / self.downscale
-                fl_y = cam.params[1] / self.downscale
-                cx = cam.params[2] / self.downscale
-                cy = cam.params[3] / self.downscale
-            else:
-                raise ValueError(f"Unsupported colmap camera model: {cam.model}")
+        for f in camdata:
+            fl_x = f['fl_x'] / self.downscale
+            fl_y = f['fl_y'] / self.downscale
+            cx = f['cx'] / self.downscale
+            cy = f['cy'] / self.downscale
+
             intrinsics.append(np.array([fl_x, fl_y, cx, cy], dtype=np.float32))
         
         self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
 
         # read poses
         poses = []
-        for k in imkeys:
-            P = np.eye(4, dtype=np.float64)
-            P[:3, :3] = imdata[k].qvec2rotmat()
-            P[:3, 3] = imdata[k].tvec
+        for f in camdata:
+            P = np.array(f['transform_matrix'])
             poses.append(P)
         
-        poses = np.linalg.inv(np.stack(poses, axis=0)) # [N, 4, 4]
-        
+        self.poses = np.stack(poses, axis=0) # [N, 4, 4]
 
         # read sparse points
-        ptsdata = read_points3d_binary(os.path.join(self.colmap_path, "points3D.bin"))
-        ptskeys = np.array(sorted(ptsdata.keys()))
-        pts3d = np.array([ptsdata[k].xyz for k in ptskeys]) # [M, 3]
-        self.ptserr = np.array([ptsdata[k].error for k in ptskeys]) # [M]
-        self.mean_ptserr = np.mean(self.ptserr)
+        # ptsdata = read_points3d_binary(os.path.join(self.colmap_path, "points3D.bin"))
+        # ptskeys = np.array(sorted(ptsdata.keys()))
+        self.pts3d = self.poses[:, :3, 3] # [M, 3]
+        
+        
 
         # center pose
-        self.poses, self.pts3d = center_poses(poses, pts3d, self.opt.enable_cam_center)
+        # self.poses, self.pts3d = center_poses(poses, pts3d, self.opt.enable_cam_center)
         print(f'[INFO] ColmapDataset: load poses {self.poses.shape}, points {self.pts3d.shape}')
 
         # rectify convention...
-        self.poses[:, :3, 1:3] *= -1
-        self.poses = self.poses[:, [1, 0, 2, 3], :]
-        self.poses[:, 2] *= -1
+        # self.poses[:, :3, 1:3] *= -1
+        # self.poses = self.poses[:, [1, 0, 2, 3], :]
+        # self.poses[:, 2] *= -1
 
-        self.pts3d = self.pts3d[:, [1, 0, 2]]
-        self.pts3d[:, 2] *= -1
+        # self.pts3d = self.pts3d[:, [1, 0, 2]]
+        # self.pts3d[:, 2] *= -1
 
         # auto-scale
         if self.scale == -1:
@@ -230,46 +114,11 @@ class ColmapDataset:
 
         if self.type != 'test':
         
-            self.cam_near_far = [] # always extract this infomation
+            self.cam_near_far = [[0.01, 8] for _ in range(self.poses.shape[0]) ] # always extract this infomation
             
             print(f'[INFO] extracting sparse depth info...')
             # map from colmap points3d dict key to dense array index
-            pts_key_to_id = np.ones(ptskeys.max() + 1, dtype=np.int64) * len(ptskeys)
-            pts_key_to_id[ptskeys] = np.arange(0, len(ptskeys))
-            # loop imgs
-            _mean_valid_sparse_depth = 0
-            for i, k in enumerate(tqdm.tqdm(imkeys)):
-                xys = imdata[k].xys
-                xys = np.stack([xys[:, 1], xys[:, 0]], axis=-1) # invert x and y convention...
-                pts = imdata[k].point3D_ids
 
-                mask = (pts != -1) & (xys[:, 0] >= 0) & (xys[:, 0] < camdata[1].height) & (xys[:, 1] >= 0) & (xys[:, 1] < camdata[1].width)
-
-                assert mask.any(), 'every image must contain sparse point'
-                
-                valid_ids = pts_key_to_id[pts[mask]]
-                pts = self.pts3d[valid_ids] # points [M, 3]
-                err = self.ptserr[valid_ids] # err [M]
-                xys = xys[mask] # pixel coord [M, 2], float, original resolution!
-
-                xys = np.round(xys / self.downscale).astype(np.int32) # downscale
-                xys[:, 0] = xys[:, 0].clip(0, self.H - 1)
-                xys[:, 1] = xys[:, 1].clip(0, self.W - 1)
-                
-                # calc the depth
-                P = self.poses[i]
-                depth = (P[:3, 3] - pts) @ P[:3, 2]
-
-                # calc weight
-                weight = 2 * np.exp(- (err / self.mean_ptserr) ** 2)
-
-                _mean_valid_sparse_depth += depth.shape[0]
-
-                # camera near far
-                # self.cam_near_far.append([np.percentile(depth, 0.1), np.percentile(depth, 99.9)])
-                self.cam_near_far.append([np.min(depth), np.max(depth)])
-
-            print(f'[INFO] extracted {_mean_valid_sparse_depth / len(imkeys):.2f} valid sparse depth on average per image')
 
             self.cam_near_far = torch.from_numpy(np.array(self.cam_near_far, dtype=np.float32)) # [N, 2]
 
@@ -338,12 +187,13 @@ class ColmapDataset:
             self.images = None
         
         else:
+            
             all_ids = np.arange(len(img_paths))
             val_ids = all_ids[::8]
-            val_ids = all_ids
+            # val_ids = all_ids[::50]
 
             if self.type == 'train':
-                train_ids = np.array([i for i in all_ids if i not in val_ids])
+                train_ids = np.array([i for i in all_ids if i not in val_ids]).astype(np.int32)
                 self.poses = self.poses[train_ids]
                 self.intrinsics = self.intrinsics[train_ids]
                 img_paths = img_paths[train_ids]
@@ -370,24 +220,18 @@ class ColmapDataset:
                     else:
                         image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGBA)
                     if image.shape[0] != self.H or image.shape[1] != self.W:
+                        
                         image = cv2.resize(image, (self.W, self.H), interpolation=cv2.INTER_AREA)
                     self.images.append(image)
                 self.images = np.stack(self.images, axis=0)
             else:
                 self.images = None
-
+    
         # view all poses.
         if self.opt.vis_pose:
             visualize_poses(self.poses, bound=self.opt.bound, points=self.pts3d)
 
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
-        
-        pose_dict = {}
-        for i in range(len(self.img_names)):
-            pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
-        with open(os.path.join(self.opt.workspace, 'pose_dir.json'), "w+") as f:
-            json.dump(pose_dict, f, indent=4)
-
 
         if self.images is not None:
             self.images = torch.from_numpy(self.images.astype(np.uint8)) # [N, H, W, C]
@@ -422,6 +266,16 @@ class ColmapDataset:
                 focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
                 intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
                 intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
+                fs = np.random.choice(len(self.poses), 2, replace=False)
+                pose0 = self.poses[fs[0]].detach().cpu().numpy()
+                pose1 = self.poses[fs[1]].detach().cpu().numpy()
+                rots = Rotation.from_matrix(np.stack([pose0[:3, :3], pose1[:3, :3]]))
+                slerp = Slerp([0, 1], rots)    
+                ratio = random.random()
+                pose = np.eye(4, dtype=np.float32)
+                pose[:3, :3] = slerp(ratio).as_matrix()
+                pose[:3, 3] = (1 - ratio) * pose0[:3, 3] + ratio * pose1[:3, 3]
+                poses = torch.from_numpy(pose).unsqueeze(0).to(self.device)
             # still use fixed pose, but change intrinsics
             else:
                 H = W = self.opt.online_resolution
@@ -432,17 +286,10 @@ class ColmapDataset:
     
         results = {'H': H, 'W': W}
 
-        rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu', 
-                        patch_size=self.opt.patch_size if self.opt.with_mask else 1)
-
-
-        img_names = [self.img_names[i] for i in index]
-        names_without_suffix = []
-        for n in img_names:
-            names_without_suffix.append(n[:-4])
-        results['img_names'] = names_without_suffix
+        rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu')
 
         if self.images is not None:
+            
             if num_rays != -1:
                 images = self.images[index, rays['j'], rays['i']].float() / 255 # [N, 3/4]
             else:

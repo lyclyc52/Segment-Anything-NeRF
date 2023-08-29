@@ -209,7 +209,7 @@ class NeRFRenderer(nn.Module):
             return results
     
 
-    def run(self, rays_o, rays_d, bg_color=None, perturb=False, cam_near_far=None, update_proposal=True, return_feats=0, H=None, W=None, **kwargs):
+    def run(self, rays_o, rays_d, bg_color=None, perturb=False, cam_near_far=None, update_proposal=True, return_feats=0, return_mask=0, H=None, W=None, **kwargs):
         # rays_o, rays_d: [N, 3]
         # return: image: [N, 3], depth: [N]
 
@@ -279,9 +279,14 @@ class NeRFRenderer(nn.Module):
                 outputs = self(xyzs, dirs)
                 sigmas = outputs['sigma']
                 colors = outputs['color']
+                geo_feat = outputs['geo_feat']
+                
                 
                 if return_feats > 0:
                     features = self.s_grid(xyzs, bound=self.bound)
+                    
+                if return_mask > 0:
+                    masks = self.m_grid(xyzs, bound=self.bound)
 
             # sigmas to weights
             deltas = (real_bins[..., 1:] - real_bins[..., :-1]) # [N, T]
@@ -335,5 +340,10 @@ class NeRFRenderer(nn.Module):
             samvit_mlp = self.samvit_mlp(f).view(H, W, -1)
 
             results['samvit'] = samvit_mlp
+            
+        if return_mask > 0:
+            m = torch.cat([masks, geo_feat], dim=-1)
+            rendered_mask = self.mask_mlp(m)
+            results['instance_mask_logits'] = rendered_mask
         
         return results

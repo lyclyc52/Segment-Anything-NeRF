@@ -106,6 +106,12 @@ class NeRFNetwork(NeRFRenderer):
                 nn.LayerNorm(256),
             )
 
+        if self.opt.with_mask:
+            self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, log2_hashmap_size=19, desired_resolution=512)
+            self.mask_mlp = nn.Sequential(
+                SkipConnMLP(self.s_dim + self.geom_feat_dim, self.opt.n_inst, 128, 2, skip_layers=[1,2], bias=True),
+            )
+            
         # proposal network
         self.prop_encoders = nn.ModuleList()
         self.prop_mlp = nn.ModuleList()
@@ -141,9 +147,11 @@ class NeRFNetwork(NeRFRenderer):
         d = self.view_encoder(d)
         
         f_color = torch.cat([feat, d], dim=-1)
-
+        
+        
         return {
             'sigma': sigma,
+            'geo_feat': feat,
             'color': f_color,
         }
 
@@ -191,5 +199,12 @@ class NeRFNetwork(NeRFRenderer):
                 {'params': self.s_grid.parameters(), 'lr': lr},
                 {'params': self.samvit_mlp.parameters(), 'lr': lr},
             ])
+
+        if self.opt.with_mask:
+            params.extend([
+                {'params': self.m_grid.parameters(), 'lr': lr},
+                {'params': self.mask_mlp.parameters(), 'lr':lr}
+            ])
+
 
         return params

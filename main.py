@@ -46,7 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--T_thresh', type=float, default=1e-4, help="minimum transmittance to continue ray marching")
 
     ### training options
-    parser.add_argument('--iters', type=int, default=10000, help="training iters")
+    parser.add_argument('--iters', type=int, default=20000, help="training iters")
     parser.add_argument('--lr', type=float, default=1e-2, help="initial learning rate")
     parser.add_argument('--num_steps', type=int, nargs='*', default=[128, 64, 32], help="num steps sampled per ray for each proposal level")
     parser.add_argument('--contract', action='store_true', help="apply spatial contraction as in mip-nerf 360, only work for bound > 1, will override bound to 2.")
@@ -66,6 +66,14 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_wd', type=float, default=0, help="loss scale")
     parser.add_argument('--lambda_proposal', type=float, default=1, help="loss scale (only for non-cuda-ray mode)")
     parser.add_argument('--lambda_distort', type=float, default=0.02, help="loss scale (only for non-cuda-ray mode)")
+    
+    
+    # train mask options
+    parser.add_argument('--with_mask', action='store_true', help="train/test with mask of some object")
+    parser.add_argument('--n_inst', type=int, default=2, help='num of instance')
+    parser.add_argument('--label_regularization_weight', type=float, default=1.0, help="label regularization weight")
+    parser.add_argument('--patch_size', type=int, default=64, help='patch size in train sampling')
+
 
     ### GUI options
     parser.add_argument('--vis_pose', action='store_true', help="visualize the poses")
@@ -76,6 +84,7 @@ if __name__ == '__main__':
     parser.add_argument('--fovy', type=float, default=60, help="default GUI camera fovy")
     parser.add_argument('--max_spp', type=int, default=1, help="GUI rendering max sample per pixel")
     
+    parser.add_argument('--data_type', type=str, default='mip', choices=['mip', 'lerf'], help="dataset type")
     opt = parser.parse_args()
 
     opt.fp16 = True
@@ -85,13 +94,21 @@ if __name__ == '__main__':
     opt.adaptive_num_rays = True
     opt.random_image_batch = True
 
-    from nerf.colmap_provider import ColmapDataset as NeRFDataset
+    from nerf.colmap_provider import ColmapDataset 
+    from nerf.lerf_provider import LERFDataset
+    
+    dataset_dict = {
+        'mip': ColmapDataset,
+        'lerf': LERFDataset
+    }
+    NeRFDataset = dataset_dict[opt.data_type]
     
     seed_everything(opt.seed)
 
     from nerf.network import NeRFNetwork
 
-    criterion = torch.nn.MSELoss(reduction='none')
+
+    criterion = torch.nn.CrossEntropyLoss(reduction='none') if opt.with_mask else torch.nn.MSELoss(reduction='none')
     # criterion = torch.nn.SmoothL1Loss(reduction='none')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -131,7 +148,7 @@ if __name__ == '__main__':
                 trainer.metrics = [PSNRMeter(), SSIMMeter(), LPIPSMeter(device=device)] # set up metrics
                 trainer.evaluate(test_loader) # blender has gt, so evaluate it.
 
-            trainer.test(test_loader, write_video=True) # test and save video
+            trainer.test(test_loader, write_video=False) # test and save video
             
     else:
         
@@ -155,7 +172,6 @@ if __name__ == '__main__':
         if opt.gui:
             gui = NeRFGUI(opt, trainer, train_loader)
             gui.render()
-        
         else:
             valid_loader = NeRFDataset(opt, device=device, type='val').dataloader()
 
