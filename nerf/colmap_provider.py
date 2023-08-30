@@ -142,15 +142,17 @@ class ColmapDataset:
         img_names = [os.path.basename(imdata[k].name) for k in imkeys]
         self.img_names = img_names
 
+
+        img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
+        if not os.path.exists(img_folder):
+            img_folder = os.path.join(self.root_path, "images")
+        img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
+        
+        
         if self.opt.with_mask:
-            img_folder = os.path.join(self.root_path, "masks")
-            img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
-        else:
-            img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
-            if not os.path.exists(img_folder):
-                img_folder = os.path.join(self.root_path, "images")
-            img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
-            
+            mask_folder = os.path.join(self.root_path, "masks")
+            mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
+
         
 
         feature_folder = os.path.join(self.root_path, 'sam_features')
@@ -340,7 +342,7 @@ class ColmapDataset:
         else:
             all_ids = np.arange(len(img_paths))
             val_ids = all_ids[::8]
-            val_ids = all_ids
+            # val_ids = all_ids
 
             if self.type == 'train':
                 train_ids = np.array([i for i in all_ids if i not in val_ids])
@@ -348,6 +350,7 @@ class ColmapDataset:
                 self.intrinsics = self.intrinsics[train_ids]
                 img_paths = img_paths[train_ids]
                 feature_paths = feature_paths[train_ids]
+                mask_paths = mask_paths[train_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[train_ids]
             elif self.type == 'val':
@@ -355,6 +358,7 @@ class ColmapDataset:
                 self.intrinsics = self.intrinsics[val_ids]
                 img_paths = img_paths[val_ids]
                 feature_paths = feature_paths[val_ids]
+                mask_paths = mask_paths[val_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[val_ids]
             # else: trainval use all.
@@ -375,6 +379,17 @@ class ColmapDataset:
                 self.images = np.stack(self.images, axis=0)
             else:
                 self.images = None
+                
+            
+            if self.opt.with_mask:
+                self.masks = []
+                for f in tqdm.tqdm(mask_paths, desc=f'Loading {self.type} mask'):
+                    f = f.replace('.jpg', '_masks.npy')
+                    mask = np.load(f).astype(int)
+                    self.masks.append(mask)
+                self.masks = np.stack(self.masks, axis=0)
+            else:
+                self.masks = None
 
         # view all poses.
         if self.opt.vis_pose:
@@ -382,21 +397,27 @@ class ColmapDataset:
 
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
         
-        pose_dict = {}
-        for i in range(len(self.img_names)):
-            pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
-        with open(os.path.join(self.opt.workspace, 'pose_dir.json'), "w+") as f:
-            json.dump(pose_dict, f, indent=4)
+        if self.type == 'eval':
+            pose_dict = {}
+            for i in range(len(self.img_names)):
+                pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
+            with open(os.path.join(self.opt.workspace, 'pose_dir.json'), "w+") as f:
+                json.dump(pose_dict, f, indent=4)
 
 
         if self.images is not None:
             self.images = torch.from_numpy(self.images.astype(np.uint8)) # [N, H, W, C]
-      
+            
+        if self.masks is not None:
+            self.masks = torch.from_numpy(self.masks)
+
         if self.preload:
             self.intrinsics = self.intrinsics.to(self.device)
             self.poses = self.poses.to(self.device)
             if self.images is not None:
                 self.images = self.images.to(self.device)
+            if self.masks is not None:
+                self.masks = self.masks.to(self.device)
             if self.cam_near_far is not None:
                 self.cam_near_far = self.cam_near_far.to(self.device)
 
@@ -405,9 +426,9 @@ class ColmapDataset:
         num_rays = -1 # defaul, eval, test, train SAM use all rays
 
         # train RGB with random rays
-        if self.training and not self.opt.with_sam:
+        if self.training and not self.opt.with_sam :
             num_rays = self.opt.num_rays
-            if self.opt.random_image_batch:
+            if self.opt.random_image_batch and not self.opt.with_mask:
                 index = torch.randint(0, len(self.poses), size=(num_rays,), device=self.device if self.preload else 'cpu')
 
         H, W = self.H, self.W
@@ -429,9 +450,17 @@ class ColmapDataset:
                 focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
                 intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
                 intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
+
+        if self.opt.with_mask:
+            H = W = self.opt.online_resolution
+            fovy = 60
+            focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
+            intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
+            intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
     
         results = {'H': H, 'W': W}
 
+   
         rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu', 
                         patch_size=self.opt.patch_size if self.opt.with_mask else 1)
 
@@ -453,6 +482,19 @@ class ColmapDataset:
                 images = images.view(-1, C)
 
             results['images'] = images.to(self.device)
+        
+
+        if self.masks is not None:
+            if num_rays != -1:
+                masks = self.masks[index, rays['j'], rays['i']] # [N, 1]
+            else:
+                masks = self.masks[index].squeeze(0) # [H, W, 1]
+
+            if self.training:
+                C = self.masks.shape[-1]
+                masks = masks.view(-1, C)
+
+            results['masks'] = masks.to(self.device)
         
         if self.opt.enable_cam_near_far and self.cam_near_far is not None:
             cam_near_far = self.cam_near_far[index] # [1/N, 2]

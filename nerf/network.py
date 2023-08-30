@@ -109,7 +109,7 @@ class NeRFNetwork(NeRFRenderer):
         if self.opt.with_mask:
             self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, log2_hashmap_size=19, desired_resolution=512)
             self.mask_mlp = nn.Sequential(
-                SkipConnMLP(self.s_dim + self.geom_feat_dim, self.opt.n_inst, 128, 2, skip_layers=[1,2], bias=True),
+                SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst, 256, 3, skip_layers=[], bias=False),
             )
             
         # proposal network
@@ -172,14 +172,19 @@ class NeRFNetwork(NeRFRenderer):
     def apply_total_variation(self, w):
         if self.opt.with_sam:
             self.s_grid.grad_total_variation(w)
+        elif self.opt.with_mask:
+            self.m_grid.grad_total_variation(w)
         else:
             self.grid.grad_total_variation(w)
 
     def apply_weight_decay(self, w):
         if self.opt.with_sam:
             self.s_grid.grad_weight_decay(w)
+        elif self.opt.with_mask:
+            self.m_grid.grad_weight_decay(w)
         else:
             self.grid.grad_weight_decay(w)
+            
 
     # optimizer utils
     def get_params(self, lr):

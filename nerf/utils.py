@@ -115,6 +115,7 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
 
             # random sample left-top cores.
             num_patch = N // (patch_size ** 2)
+
             inds_x = torch.randint(0, H - patch_size, size=[num_patch], device=device)
             inds_y = torch.randint(0, W - patch_size, size=[num_patch], device=device)
             inds = torch.stack([inds_x, inds_y], dim=-1) # [np, 2]
@@ -475,7 +476,7 @@ class Trainer(object):
         pred_masks: [B, N, num_instances]
         '''
         pred_masks = pred_masks.view(-1, self.opt.patch_size, self.opt.patch_size, 
-            self.num_instances).permute(0, 3, 1, 2).contiguous() # [B, num_instances, patch_size, patch_size]
+            self.opt.n_inst).permute(0, 3, 1, 2).contiguous() # [B, num_instances, patch_size, patch_size]
 
         diff_x = pred_masks[:, :, :, 1:] - pred_masks[:, :, :, :-1]
         diff_y = pred_masks[:, :, 1:, :] - pred_masks[:, :, :-1, :]
@@ -557,8 +558,7 @@ class Trainer(object):
         # online distillation of SAM features
         else:
             if self.opt.with_mask:                
-                gt_mask = data['mask'] # [B, N], N=H*W?
-
+                gt_mask = data['masks'].to(torch.long) # [B, N], N=H*W?
                 B, N = gt_mask.shape
                 # num_instances = torch.unique(gt_masks).shape[0]
 
@@ -566,14 +566,14 @@ class Trainer(object):
 
                 outputs = self.model.render(rays_o, rays_d, staged=False, index=index, bg_color=bg_color, perturb=False, cam_near_far=cam_near_far, update_proposal=False, return_feats=0, return_mask=1)
 
-                
                 pred_masks = outputs['instance_mask_logits'] # [B, N, num_instances]
-                pred_masks_flattened = pred_masks.view(-1, self.num_instances) # [B*N, num_instances]
+                pred_masks_flattened = pred_masks.view(-1, self.opt.n_inst) # [B*N, num_instances]
                 gt_masks_flattened = gt_mask.view(-1) # [B*N]
                 
                 
                 labeled = gt_masks_flattened != -1  # only compute loss for labeled pixels
                 if labeled.sum() > 0:
+           
                     loss = self.criterion(pred_masks_flattened[labeled], gt_masks_flattened[labeled]) # [B*N], loss fn with reduction='none'
                 else:
                     loss = torch.tensor(0).to(pred_masks_flattened.dtype).to(self.device)
@@ -654,6 +654,7 @@ class Trainer(object):
 
         pred_rgb = outputs['image'].reshape(H, W, 3)
         pred_depth = outputs['depth'].reshape(H, W)
+        
 
         if not self.opt.with_sam and not self.opt.with_mask:
             images = data['images'] # [H, W, 3/4]
@@ -669,9 +670,9 @@ class Trainer(object):
 
         else:
             if self.opt.with_mask:
-                gt_mask = data['mask']
+                gt_mask = data['masks'].to(torch.long)
                 pred_mask = outputs['instance_mask_logits'].reshape(H, W, -1)
-
+                    
                 pred_mask_flattened = pred_mask.view(-1, self.opt.n_inst) # [B*H*W, num_instances]
                 gt_mask_flattened = gt_mask.view(-1) # [B*H*W]
 
@@ -682,15 +683,14 @@ class Trainer(object):
                     loss = loss + self.label_regularization(outputs['depth'].detach(), pred_mask) * self.opt.label_regularization_weight
 
 
-
                 pred_mask = torch.softmax(pred_mask, dim=-1) # [B, H, W, num_instances]
-                pred_mask = pred_mask.argmax(dim=-1) # [B, H, W]
+                # pred_mask = pred_mask.argmax(dim=-1) # [B, H, W]
                 
-                pred_seg = overlay_mask(pred_rgb, pred_mask)
+                # pred_seg = overlay_mask(pred_rgb, pred_mask)
                 
-                gt_seg = overlay_mask(pred_rgb, gt_mask)
+                # gt_seg = overlay_mask(pred_rgb, gt_mask)
 
-                return pred_seg, pred_depth, pred_mask, gt_seg, loss
+                return pred_rgb, pred_depth, pred_mask, gt_mask, loss
             
             if self.opt.with_sam:
                 # encode SAM ground truth
@@ -745,7 +745,8 @@ class Trainer(object):
 
 
         if self.opt.with_mask:
-            pred_mask = outputs['logistic'].reshape(H, W, self.opt.n_inst)
+            pred_mask = outputs['instance_mask_logits'].reshape(H, W, self.opt.n_inst)
+            pred_mask
             pred_rgb = overlay_mask(pred_rgb, pred_mask, color=[0,0,1])
             
         if self.opt.with_sam:   
@@ -1203,6 +1204,7 @@ class Trainer(object):
                 
                 with torch.cuda.amp.autocast(enabled=self.opt.fp16):
                     preds, preds_depth, preds_extra, truths, loss = self.eval_step(data)
+                    
                 # all_gather/reduce the statistics (NCCL only support all_*)
                 if self.world_size > 1:
                     dist.all_reduce(loss, op=dist.ReduceOp.SUM)
@@ -1228,7 +1230,7 @@ class Trainer(object):
                 loss_val = loss.item()
                 total_loss += loss_val
 
-                # only rank = 0 will perform evaluation.
+     
                 if self.local_rank == 0:
                     
                     metric_vals = []
@@ -1239,7 +1241,7 @@ class Trainer(object):
                     # save image
                     save_path = os.path.join(self.workspace, 'validation', f'{name}_{image_name}_rgb.png')
                     save_path_gt = os.path.join(self.workspace, 'validation', f'{name}_{image_name}_gt.png') 
-                    save_path_depth = os.path.join(self.workspace, 'validation', f'{name}_{image_name}_depth.png')
+                    save_path_depth = os.path.join(self.workspace, 'validation', f'{name}_{image_name}_depth.npy')
                     save_path_error = os.path.join(self.workspace, 'validation', f'{name}_{image_name}_error_{metric_vals[0]:.2f}.png') # metric_vals[0] should be the PSNR
 
                     if self.opt.with_sam:
@@ -1255,8 +1257,8 @@ class Trainer(object):
                     pred = (pred * 255).astype(np.uint8)
 
                     pred_depth = preds_depth.detach().cpu().numpy()
-                    pred_depth = (pred_depth - pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-6)
-                    pred_depth = (pred_depth * 255).astype(np.uint8)
+                    # pred_depth = (pred_depth - pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-6)
+                    # pred_depth = (pred_depth * 255).astype(np.uint8)
 
                     truth = truths.detach().cpu().numpy()
                     truth = (truth * 255).astype(np.uint8)
@@ -1264,18 +1266,21 @@ class Trainer(object):
                     
                     cv2.imwrite(save_path, cv2.cvtColor(pred, cv2.COLOR_RGB2BGR))
                     cv2.imwrite(save_path_gt, cv2.cvtColor(truth, cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(save_path_depth, pred_depth)
                     cv2.imwrite(save_path_error, error)
+                    np.save(save_path_depth, pred_depth)
                     
                     if self.opt.with_sam or self.opt.with_mask:
                         pred_extra = preds_extra.detach().cpu().numpy()
                         np.save(save_path_extra, pred_extra)
+                        
+                    # if self.opt.with_mask:
+                    #     pred_extra = preds_extra.detach().cpu().numpy()
+                    #     np.save(save_path_extra, pred_extra)
 
                 
                     pbar.set_description(f"loss={loss_val:.6f} ({total_loss/self.local_step:.6f})")
                     pbar.update(loader.batch_size)
-
-
+                    
         average_loss = total_loss / self.local_step
         self.stats["valid_loss"].append(average_loss)
 

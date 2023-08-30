@@ -29,7 +29,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_cnt', type=int, default=20, help="save checkpoints for $ times during training")
     parser.add_argument('--eval_cnt', type=int, default=5, help="perform validation for $ times during training")
     parser.add_argument('--test', action='store_true', help="test mode")
-    parser.add_argument('--camera_traj', type=str, default='interp', help="interp for interpolation, circle for circular camera")
+    parser.add_argument('--camera_traj', type=str, default='interp', help="interp for interpolatxion, circle for circular camera")
 
     ### dataset options
     parser.add_argument('--train_split', type=str, default='train', choices=['train', 'trainval', 'all'])
@@ -71,8 +71,8 @@ if __name__ == '__main__':
     # train mask options
     parser.add_argument('--with_mask', action='store_true', help="train/test with mask of some object")
     parser.add_argument('--n_inst', type=int, default=2, help='num of instance')
-    parser.add_argument('--label_regularization_weight', type=float, default=1.0, help="label regularization weight")
-    parser.add_argument('--patch_size', type=int, default=64, help='patch size in train sampling')
+    parser.add_argument('--label_regularization_weight', type=float, default=0., help="label regularization weight")
+    parser.add_argument('--patch_size', type=int, default=1, help='patch size in train sampling')
 
 
     ### GUI options
@@ -87,7 +87,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_type', type=str, default='mip', choices=['mip', 'lerf'], help="dataset type")
     opt = parser.parse_args()
 
-    opt.fp16 = True
+    opt.fp16 = False
     opt.bound = 128 # large enough
     opt.preload = True # unset if CUDA OOM
     opt.contract = True
@@ -115,7 +115,7 @@ if __name__ == '__main__':
 
     model = NeRFNetwork(opt).to(device)
 
-    if opt.with_sam and opt.init_ckpt != '':
+    if (opt.with_sam or opt.with_mask) and opt.init_ckpt != '':
         # load pretrained checkpoint of rgbd
         model_dict = torch.load(opt.init_ckpt, map_location=device)['model']
         model.load_state_dict(model_dict, strict=False)

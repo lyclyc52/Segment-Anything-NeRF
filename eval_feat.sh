@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=2
 python main.py /ssddata/yliugu/teatime \
 --workspace trial2_teatime \
 --enable_cam_center \

@@ -313,6 +313,7 @@ class NeRFRenderer(nn.Module):
         
         depth = torch.sum(weights * rays_t, dim=-1) # [N]
 
+        
         f_image = torch.sum(weights.unsqueeze(-1) * colors, dim=-2) # [N, C]
         image = torch.sigmoid(self.view_mlp(f_image)) # [N, 3]
 
@@ -342,8 +343,10 @@ class NeRFRenderer(nn.Module):
             results['samvit'] = samvit_mlp
             
         if return_mask > 0:
-            m = torch.cat([masks, geo_feat], dim=-1)
-            rendered_mask = self.mask_mlp(m)
-            results['instance_mask_logits'] = rendered_mask
+            m = torch.cat([masks, geo_feat.detach()], dim=-1)
+            point_masks = self.mask_mlp(m)
+            results['instance_mask_logits'] = torch.sum(weights.detach().unsqueeze(-1) * point_masks, dim=-2)
+
+            
         
         return results
