@@ -150,7 +150,7 @@ class ColmapDataset:
         
         
         if self.opt.with_mask:
-            mask_folder = os.path.join(self.root_path, "masks")
+            mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
             mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
 
         
@@ -342,7 +342,8 @@ class ColmapDataset:
         else:
             all_ids = np.arange(len(img_paths))
             val_ids = all_ids[::8]
-            # val_ids = all_ids
+            if self.opt.val_all:
+                val_ids = all_ids
 
             if self.type == 'train':
                 train_ids = np.array([i for i in all_ids if i not in val_ids])
@@ -350,7 +351,8 @@ class ColmapDataset:
                 self.intrinsics = self.intrinsics[train_ids]
                 img_paths = img_paths[train_ids]
                 feature_paths = feature_paths[train_ids]
-                mask_paths = mask_paths[train_ids]
+                if self.opt.with_mask:
+                    mask_paths = mask_paths[train_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[train_ids]
             elif self.type == 'val':
@@ -358,7 +360,8 @@ class ColmapDataset:
                 self.intrinsics = self.intrinsics[val_ids]
                 img_paths = img_paths[val_ids]
                 feature_paths = feature_paths[val_ids]
-                mask_paths = mask_paths[val_ids]
+                if self.opt.with_mask:
+                    mask_paths = mask_paths[val_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[val_ids]
             # else: trainval use all.

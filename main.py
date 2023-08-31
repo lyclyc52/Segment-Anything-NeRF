@@ -67,12 +67,28 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_proposal', type=float, default=1, help="loss scale (only for non-cuda-ray mode)")
     parser.add_argument('--lambda_distort', type=float, default=0.02, help="loss scale (only for non-cuda-ray mode)")
     
+
     
     # train mask options
     parser.add_argument('--with_mask', action='store_true', help="train/test with mask of some object")
     parser.add_argument('--n_inst', type=int, default=2, help='num of instance')
     parser.add_argument('--label_regularization_weight', type=float, default=0., help="label regularization weight")
     parser.add_argument('--patch_size', type=int, default=1, help='patch size in train sampling')
+    parser.add_argument('--mask_folder_name', type=str, default='masks', help="mask folder name")
+    parser.add_argument('--use_wandb', action='store_true')
+    
+    # evaluation option
+    parser.add_argument('--use_point', action='store_true', help='use point to generate mask')
+    parser.add_argument('--val_all', action='store_true', help='evaluate all images')
+    
+    
+    # render mask options
+    parser.add_argument('--render_mask_type', type=str, default='heatmap', choices=['mask', 'composition', 'heatmap'], help='type of mask that the system will render \
+                                                                                                                                mask: output mask only \
+                                                                                                                                composition: output mask composed with rgb image \
+                                                                                                                                heatmap: output heatmap')
+    parser.add_argument('--render_mask_instance_id', type=int, default=0, help='determine which instance it will choose to render')
+
 
 
     ### GUI options
@@ -168,6 +184,11 @@ if __name__ == '__main__':
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
 
         trainer = Trainer('ngp', opt, model, device=device, workspace=opt.workspace, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, use_checkpoint=opt.ckpt, eval_interval=eval_interval, save_interval=save_interval, sam_predictor=sam_predictor)
+
+        if opt.use_wandb:
+            wandb.init(
+                 config=opt
+            )
 
         if opt.gui:
             gui = NeRFGUI(opt, trainer, train_loader)

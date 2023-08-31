@@ -6,4 +6,5 @@ python main.py /ssddata/yliugu/teatime \
 --data_type mip \
 --test \
 --test_split val \
---with_sam
+--with_sam \
+--val_all

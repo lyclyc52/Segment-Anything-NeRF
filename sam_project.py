@@ -8,6 +8,7 @@ import tqdm
 import matplotlib.pyplot as plt
 from segment_anything import sam_model_registry, SamPredictor
 import torch.nn.functional as F
+import argparse
 
 def show_points(coords, labels, ax, marker_size=375):
     pos_points = coords[labels==1]
@@ -51,20 +52,18 @@ def downsample_sam_feature(feature):
     return downsampled_feature
 
 
-def main():
-    sam_checkpoint = "/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth"
-    device = "cuda:3"
-    model_type = "vit_h"
-    threshold = 0.1
-    # frame_root = '/disk1/yliugu/torch-ngp/workspace/3dfront_0089_t0_results/results/frames'
-    pose_file = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/pose_dir.json'
-    frame_root = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/validation'
-    camera_poses = os.path.join(frame_root, 'camera.npz')
+def main(args):
+    sam_checkpoint = args.sam_checkpoint
+    device = args.device
+    model_type = args.model_type
+    threshold = args.threshold
 
-    output_root = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/masks'
+    pose_file = args.pose_file
+    frame_root = args.frame_root
+    camera_poses = args.camera_poses
+    output_root = args.output_root
 
-    input_point = np.array([[100, 330]])
-    input_label = np.array([1])
+
     
     
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
@@ -118,16 +117,13 @@ def main():
         p[:,2] = -p[:, 2]
         output_file = os.path.join(output_root, f'{frame_names[i]}_masks.npy')
       
-        image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
-        r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
         d = np.load(depth_name)[..., None]
-        f = np.load(feature_name)[0]
+
 
         pts_2D, pts_depth = project_to_2d(pts_3D, p, n)
         
-        # valid = pts_2D[..., 1] < r.shape[0] and pts_2D[..., 0] < r.shape[1] and \
-        #     pts_2D[..., 1] >= 0 and pts_2D[..., 0] >=0
-        valid =  np.logical_and.reduce((pts_2D[..., 1] < r.shape[0], pts_2D[..., 0] < r.shape[1],
+        valid =  np.logical_and.reduce((pts_2D[..., 1] < d.shape[0], pts_2D[..., 0] < d.shape[1],
             pts_2D[..., 1] >= 0, pts_2D[..., 0] >=0))
 
         if valid.sum() < 1:
@@ -172,8 +168,15 @@ def main():
         pts_label = pts_label[valid]
         
         
-        f = downsample_sam_feature(f)
-        predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
+        
+        image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
+        r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        if args.use_nerf_feature:
+            f = np.load(feature_name)[0]
+            f = downsample_sam_feature(f)
+            predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
+        else:
+            predictor.set_image(r)
         
         masks, scores, logits = predictor.predict(
             point_coords=pts_2D.numpy(),
@@ -524,6 +527,31 @@ def create_video():
     
 
 if __name__ == '__main__':
-    main()
+    
+    
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
+    parser.add_argument('--device', type=str, default='cuda:3')
+    parser.add_argument('--model_type', type=str, default='vit_h')
+    parser.add_argument('--threshold', type=float, default=0.1)
+    parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/pose_dir.json')
+    parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/validation')
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/sam_masks')
+    parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
+    
+    
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+    # parser.add_argument('--threshold', type=float, default=0.1)
+
+    args = parser.parse_args()
+    args.camera_poses = os.path.join(args.frame_root, 'camera.npz')
+    main(args)
     # get_3d_pts()
     # create_video()

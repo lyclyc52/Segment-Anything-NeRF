@@ -6,6 +6,7 @@ import imageio
 import random
 import warnings
 import tensorboardX
+import wandb
 
 import numpy as np
 
@@ -44,6 +45,45 @@ def overlay_mask(image, mask, alpha=0.7, color=[1, 0, 0]):
     over_image = image.clone()
     over_image[mask] = torch.tensor(color, device=image.device, dtype=image.dtype)
     return image * alpha + over_image * (1 - alpha)
+
+def overlay_mask_only(instance_id, color_map=None, render_id=-1):
+    H, W = instance_id.shape
+    instance_id = instance_id.reshape(H*W)
+
+    if render_id == -1:
+        color_mask = color_map[instance_id]
+        color_mask = color_mask.reshape(H, W, -1)
+    else:
+        mask = instance_id == render_id
+        color_mask = torch.zeros([H, W, 3], device=instance_id.device)
+        color_mask[mask] = torch.tensor(color_map[render_id])
+    return color_mask 
+
+def overlay_mask_composition(image, instance_id, color_map=None, render_id=-1, alpha=0.7):
+    H, W = instance_id.shape
+    instance_id_flatten = instance_id.reshape(H*W)
+    color_mask = color_map[instance_id_flatten]
+    color_mask = color_mask.reshape(H, W, -1)
+    if render_id != -1:
+        mask = instance_id != render_id
+        color_mask[mask] = image[mask]
+    return image * alpha + color_mask * (1 - alpha)
+
+def overlay_mask_heatmap(mask, instance_id, color_map=None, alpha=0.7):
+    # image: [H, W, 3]
+    # mask: [H, W]
+    
+    if isinstance(instance_id, int):
+        instance_id = torch.ones_like(mask) * instance_id
+        instance_id = instance_id.to(color_map.device).to(torch.int32)
+    H, W = instance_id.shape
+    instance_id = instance_id.reshape(H*W)
+    color_mask = color_map[instance_id]
+    color_mask = color_mask.reshape(H, W, -1)
+
+    output = color_mask * mask[..., None]
+
+    return output
 
 def overlay_point(image, points, radius=2, color=[0, 1, 0]):
     # image: [H, W, 3]
@@ -387,7 +427,10 @@ class Trainer(object):
             criterion.to(self.device)
         self.criterion = criterion
         
-        
+        self.color_map = np.multiply([
+                    plt.cm.get_cmap('gist_ncar', 41)((i * 7 + 5) % 41)[:3] for i in range(41)
+                    ], 1)
+        self.color_map = torch.from_numpy(self.color_map).to(self.device).to(torch.float)
 
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -578,6 +621,8 @@ class Trainer(object):
                 else:
                     loss = torch.tensor(0).to(pred_masks_flattened.dtype).to(self.device)
                     
+
+                    
                 loss = loss.mean()
 
                 if self.opt.label_regularization_weight > 0:
@@ -710,18 +755,21 @@ class Trainer(object):
                 loss = self.criterion(pred_samvit, gt_samvit).mean()
 
                 # TODO: grid point samples to evaluate IoU...
-                masks, point_coords, low_res_masks = self.sam_predict(H, W, pred_samvit)
+                if self.opt.use_point:
+                    masks, point_coords, low_res_masks = self.sam_predict(H, W, pred_samvit)
 
-                pred_seg = overlay_mask(pred_rgb, masks[0])
-                pred_seg = overlay_point(pred_seg, point_coords)
+                    pred_seg = overlay_mask(pred_rgb, masks[0])
+                    pred_seg = overlay_point(pred_seg, point_coords)
 
-                # gt_masks, point_coords, low_res_masks = self.sam_predict(H, W, gt_samvit, point_coords, image=(pred_rgb.detach().cpu().numpy() * 255).astype(np.uint8))
-                gt_masks, point_coords, low_res_masks = self.sam_predict(H, W, gt_samvit, point_coords) # use gt feature to debug
+                    # gt_masks, point_coords, low_res_masks = self.sam_predict(H, W, gt_samvit, point_coords, image=(pred_rgb.detach().cpu().numpy() * 255).astype(np.uint8))
+                    gt_masks, point_coords, low_res_masks = self.sam_predict(H, W, gt_samvit, point_coords) # use gt feature to debug
 
-                gt_seg = overlay_mask(pred_rgb, gt_masks[0])
-                gt_seg = overlay_point(gt_seg, point_coords)
+                    gt_seg = overlay_mask(pred_rgb, gt_masks[0])
+                    gt_seg = overlay_point(gt_seg, point_coords)
 
-                return pred_seg, pred_depth, pred_samvit, gt_seg, loss
+                    return pred_seg, pred_depth, pred_samvit, gt_seg, loss
+                else:
+                    return pred_rgb, pred_depth, pred_samvit, pred_rgb, loss
     
 
     def test_step(self, data, bg_color=None, perturb=False, point_coords=None):  
@@ -746,8 +794,37 @@ class Trainer(object):
 
         if self.opt.with_mask:
             pred_mask = outputs['instance_mask_logits'].reshape(H, W, self.opt.n_inst)
-            pred_mask
-            pred_rgb = overlay_mask(pred_rgb, pred_mask, color=[0,0,1])
+            pred_mask = torch.softmax(pred_mask, dim=-1) 
+            
+            if self.opt.render_mask_type == 'heatmap':
+                if self.opt.render_mask_instance_id >= 0 and self.opt.render_mask_instance_id < self.opt.n_inst:
+                    instance_mask = pred_mask[..., self.opt.render_mask_instance_id]
+                    instance_id = self.opt.render_mask_instance_id
+                else:
+                    instance_mask, _ = torch.max(pred_mask, -1)
+                    instance_id = pred_mask.argmax(-1)
+
+                pred_rgb = overlay_mask_heatmap(instance_mask, instance_id, color_map=self.color_map)
+            elif self.opt.render_mask_type == 'composition':
+                instance_mask, _ = torch.max(pred_mask, -1)
+                instance_id = pred_mask.argmax(-1)
+                
+                if self.opt.render_mask_instance_id >= 0 and self.opt.render_mask_instance_id < self.opt.n_inst:
+                    render_id = self.opt.render_mask_instance_id
+                else:
+                    render_id = -1
+                
+                pred_rgb = overlay_mask_composition(pred_rgb, instance_id, color_map=self.color_map, render_id=render_id)
+            elif self.opt.render_mask_type == 'mask':
+                instance_mask, _ = torch.max(pred_mask, -1)
+                instance_id = pred_mask.argmax(-1)
+                
+                if self.opt.render_mask_instance_id >= 0 and self.opt.render_mask_instance_id < self.opt.n_inst:
+                    render_id = self.opt.render_mask_instance_id
+                else:
+                    render_id = -1
+                
+                pred_rgb = overlay_mask_only(instance_id, color_map=self.color_map, render_id=render_id)
             
         if self.opt.with_sam:   
             h, w = data['h'], data['w']
@@ -895,7 +972,7 @@ class Trainer(object):
             self.train_one_epoch(train_loader)
 
             if (self.epoch % self.save_interval == 0 or self.epoch == max_epochs) and self.workspace is not None and self.local_rank == 0:
-                self.save_checkpoint(full=True, best=False)
+                self.save_checkpoint(full=True, best=False, remove_old=False)
 
             if self.epoch % self.eval_interval == 0:
                 self.evaluate_one_epoch(valid_loader)
@@ -991,9 +1068,10 @@ class Trainer(object):
 
             with torch.cuda.amp.autocast(enabled=self.opt.fp16):
                 preds, truths, loss_net = self.train_step(data)
-            
+
             loss = loss_net
-         
+            if self.opt.use_wandb:
+                wandb.log({"loss": loss})        
             self.scaler.scale(loss).backward()
 
             self.post_train_step() # for TV loss...
@@ -1120,7 +1198,8 @@ class Trainer(object):
                 preds, truths, loss_net = self.train_step(data)
             
             loss = loss_net
-         
+            if self.opt.use_wandb:
+                wandb.log({"loss": loss})  
             self.scaler.scale(loss).backward()
 
             self.post_train_step() # for TV loss...

@@ -5,4 +5,4 @@ python main.py /ssddata/yliugu/teatime \
 --with_sam \
 --init_ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial1_teatime/checkpoints/ngp_ep0065.pth \
 --data_type mip \
---iters 5000
+--iters 5000 
