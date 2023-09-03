@@ -82,9 +82,7 @@ class LayerNorm2d(nn.Module):
 
 
 class NeRFNetwork(NeRFRenderer):
-    def __init__(self,
-                 opt,
-                 ):
+    def __init__(self, opt):
 
         super().__init__(opt)
 
@@ -105,13 +103,19 @@ class NeRFNetwork(NeRFRenderer):
                 SkipConnMLP(self.s_dim + self.geom_feat_dim + self.view_in_dim + 4, 256, 256, 5, skip_layers=[2], bias=True),
                 nn.LayerNorm(256),
             )
+        elif self.opt.with_mask:
+            if not self.opt.lightweight_mask:
+                self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, 
+                                                      log2_hashmap_size=19, desired_resolution=512)
+                self.mask_mlp = nn.Sequential(
+                    SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst, 256, 3, skip_layers=[], bias=False),
+                )
+            else:
+                self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=2, base_resolution=16, 
+                                                      log2_hashmap_size=19, desired_resolution=512)
+                # self.mask_mlp = MLP(self.m_dim + self.geom_feat_dim + self.view_in_dim + 4, self.opt.n_inst, 64, 3, bias=False)
+                self.mask_mlp = MLP(self.geom_feat_dim + self.view_in_dim + 4, self.opt.n_inst, 64, 3, bias=False)
 
-        if self.opt.with_mask:
-            self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, log2_hashmap_size=19, desired_resolution=512)
-            self.mask_mlp = nn.Sequential(
-                SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst, 256, 3, skip_layers=[], bias=False),
-            )
-            
         # proposal network
         self.prop_encoders = nn.ModuleList()
         self.prop_mlp = nn.ModuleList()
@@ -126,7 +130,6 @@ class NeRFNetwork(NeRFRenderer):
         prop1_mlp = MLP(prop1_in_dim, 1, 16, 2, bias=False)
         self.prop_encoders.append(prop1_encoder)
         self.prop_mlp.append(prop1_mlp)
-
 
     def common_forward(self, x):
 
@@ -148,13 +151,11 @@ class NeRFNetwork(NeRFRenderer):
         
         f_color = torch.cat([feat, d], dim=-1)
         
-        
         return {
             'sigma': sigma,
             'geo_feat': feat,
             'color': f_color,
         }
-
 
     def density(self, x, proposal=-1):
 
@@ -185,7 +186,6 @@ class NeRFNetwork(NeRFRenderer):
         else:
             self.grid.grad_weight_decay(w)
             
-
     # optimizer utils
     def get_params(self, lr):
 
@@ -211,5 +211,5 @@ class NeRFNetwork(NeRFRenderer):
                 {'params': self.mask_mlp.parameters(), 'lr':lr}
             ])
 
-
         return params
+    

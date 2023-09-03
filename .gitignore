@@ -12,3 +12,5 @@ trial*/
 .pth
 pretrained
 
+wandb/
+workspace/
