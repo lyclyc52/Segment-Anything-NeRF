@@ -10,10 +10,28 @@ from scipy.spatial.transform import Slerp, Rotation
 import trimesh
 
 import torch
+import torch.nn.functional as F
+
 from torch.utils.data import DataLoader
 
 from .utils import get_rays
 from .colmap_utils import *
+
+
+
+def get_incoherent_mask(input_masks, sfact=2):
+    mask = input_masks.float()
+    w = input_masks.shape[-1]
+    h = input_masks.shape[-2]
+    mask_small = F.interpolate(mask, (h//sfact, w//sfact), mode='bilinear')
+    mask_recover = F.interpolate(mask_small, (h, w), mode='bilinear')
+    mask_residue = (mask - mask_recover).abs()
+    mask_uncertain = F.interpolate(
+        mask_residue, (h//sfact, w//sfact), mode='bilinear')
+    mask_uncertain[mask_uncertain >= 0.01] = 1.
+
+    return mask_uncertain
+
 
 def rotmat(a, b):
 	a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
@@ -386,11 +404,19 @@ class ColmapDataset:
             
             if self.opt.with_mask:
                 self.masks = []
-                for f in tqdm.tqdm(mask_paths, desc=f'Loading {self.type} mask'):
+                self.boundary_masks = []
+                self.valid_mask_index = []
+                for idx in tqdm.tqdm(range(len(mask_paths)), desc=f'Loading {self.type} mask'):
+                    f = mask_paths[idx]
                     f = f.replace('.jpg', '_masks.npy')
-                    mask = np.load(f).astype(int)
-                    self.masks.append(mask)
-                self.masks = np.stack(self.masks, axis=0)
+                    mask = torch.from_numpy(np.load(f))
+                    if mask.sum()>=10:
+                        self.valid_mask_index.append(idx)
+                    self.masks.append(mask.to(int))
+
+                self.masks = torch.stack(self.masks, axis=0)
+                self.incoherent_masks = get_incoherent_mask(self.masks.permute(0,3,1,2))
+
             else:
                 self.masks = None
 
@@ -400,7 +426,8 @@ class ColmapDataset:
 
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
         
-        if self.type == 'eval':
+        if self.opt.val_all:
+            print(len(self.poses))
             pose_dict = {}
             for i in range(len(self.img_names)):
                 pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
@@ -411,8 +438,7 @@ class ColmapDataset:
         if self.images is not None:
             self.images = torch.from_numpy(self.images.astype(np.uint8)) # [N, H, W, C]
             
-        if self.masks is not None:
-            self.masks = torch.from_numpy(self.masks)
+
 
         if self.preload:
             self.intrinsics = self.intrinsics.to(self.device)
@@ -421,14 +447,18 @@ class ColmapDataset:
                 self.images = self.images.to(self.device)
             if self.masks is not None:
                 self.masks = self.masks.to(self.device)
+                self.boundary_masks = self.masks.to(self.device)
             if self.cam_near_far is not None:
                 self.cam_near_far = self.cam_near_far.to(self.device)
 
     def collate(self, index):
     
         num_rays = -1 # defaul, eval, test, train SAM use all rays
-
-        # train RGB with random rays
+        if self.opt.with_mask:
+            if index not in self.valid_mask_index:
+                index= random.sample(self.valid_mask_index, 1)
+                
+                
         if self.training and not self.opt.with_sam :
             num_rays = self.opt.num_rays
             if self.opt.random_image_batch and not self.opt.with_mask:
@@ -463,9 +493,9 @@ class ColmapDataset:
     
         results = {'H': H, 'W': W}
 
-   
+        boundary_mask = self.boundary_masks[index][0] if self.boundary_masks is not None else None
         rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu', 
-                        patch_size=self.opt.patch_size if self.opt.with_mask else 1)
+                        patch_size=self.opt.patch_size if self.opt.with_mask else 1, boundary_mask=boundary_mask)
 
 
         img_names = [self.img_names[i] for i in index]

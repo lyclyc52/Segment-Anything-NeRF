@@ -1,0 +1,235 @@
+[INFO] Trainer: ngp | 2023-09-04_14-36-26 | cuda | fp32 | /ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime
+[INFO] #parameters: 42170752
+Namespace(path='/ssddata/yliugu/teatime', workspace='/ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime', seed=0, ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0002.pth', fp16=False, with_sam=False, init_ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial1_teatime/checkpoints/ngp.pth', sam_ckpt='./pretrained/sam_vit_h_4b8939.pth', online_resolution=512, cache_size=256, cache_interval=4, save_cnt=20, eval_cnt=5, test=True, camera_traj='interp', train_split='train', test_split='val', preload=True, random_image_batch=True, downscale=1, bound=128, scale=-1, offset=[0, 0, 0], enable_cam_near_far=False, enable_cam_center=True, min_near=0.2, T_thresh=0.0001, iters=20000, lr=0.01, num_steps=[128, 64, 32], contract=True, background='last_sample', max_ray_batch=16384, density_thresh=10, num_rays=8192, adaptive_num_rays=True, num_points=262144, lambda_entropy=0, lambda_tv=0, lambda_wd=0, lambda_proposal=1, lambda_distort=0.02, with_mask=True, lightweight_mask=False, n_inst=2, label_regularization_weight=0.0, patch_size=1, mask_folder_name='masks', use_wandb=False, use_point=False, val_all=False, render_mask_type='composition', render_mask_instance_id=1, vis_pose=False, gui=True, W=512, H=512, radius=0.5, fovy=60, max_spp=1, data_type='mip')
+NeRFNetwork(
+  (grid): GridEncoder: input_dim=3 num_levels=16 level_dim=2 resolution=16 -> 4096 per_level_scale=1.4473 params=(6299960, 2) gridtype=hash align_corners=False interpolation=linear
+  (grid_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=32, out_features=64, bias=False)
+      (1): Linear(in_features=64, out_features=64, bias=False)
+      (2): Linear(in_features=64, out_features=16, bias=False)
+    )
+  )
+  (view_encoder): SHEncoder: input_dim=3 degree=4
+  (view_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=31, out_features=32, bias=False)
+      (1): Linear(in_features=32, out_features=32, bias=False)
+      (2): Linear(in_features=32, out_features=3, bias=False)
+    )
+  )
+  (m_grid): GridEncoder: input_dim=3 num_levels=16 level_dim=8 resolution=16 -> 512 per_level_scale=1.2599 params=(5258512, 8) gridtype=hash align_corners=False interpolation=linear
+  (mask_mlp): Sequential(
+    (0): SkipConnMLP(
+      (net): ModuleList(
+        (0): Linear(in_features=143, out_features=256, bias=False)
+        (1): Linear(in_features=256, out_features=256, bias=False)
+        (2): Linear(in_features=256, out_features=2, bias=False)
+      )
+    )
+  )
+  (prop_encoders): ModuleList(
+    (0): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 128 per_level_scale=1.6818 params=(383264, 2) gridtype=hash align_corners=False interpolation=linear
+    (1): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 256 per_level_scale=2.0000 params=(430080, 2) gridtype=hash align_corners=False interpolation=linear
+  )
+  (prop_mlp): ModuleList(
+    (0-1): 2 x MLP(
+      (net): ModuleList(
+        (0): Linear(in_features=10, out_features=16, bias=False)
+        (1): Linear(in_features=16, out_features=1, bias=False)
+      )
+    )
+  )
+)
+[INFO] Loading /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0002.pth ...
+[INFO] loaded model.
+[INFO] load at epoch 2, global step 618
+[INFO] loaded scaler.
+[INFO] Trainer: ngp | 2023-09-04_14-37-19 | cuda | fp32 | /ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime
+[INFO] #parameters: 42170752
+Namespace(path='/ssddata/yliugu/teatime', workspace='/ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime', seed=0, ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0005.pth', fp16=False, with_sam=False, init_ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial1_teatime/checkpoints/ngp.pth', sam_ckpt='./pretrained/sam_vit_h_4b8939.pth', online_resolution=512, cache_size=256, cache_interval=4, save_cnt=20, eval_cnt=5, test=True, camera_traj='interp', train_split='train', test_split='val', preload=True, random_image_batch=True, downscale=1, bound=128, scale=-1, offset=[0, 0, 0], enable_cam_near_far=False, enable_cam_center=True, min_near=0.2, T_thresh=0.0001, iters=20000, lr=0.01, num_steps=[128, 64, 32], contract=True, background='last_sample', max_ray_batch=16384, density_thresh=10, num_rays=8192, adaptive_num_rays=True, num_points=262144, lambda_entropy=0, lambda_tv=0, lambda_wd=0, lambda_proposal=1, lambda_distort=0.02, with_mask=True, lightweight_mask=False, n_inst=2, label_regularization_weight=0.0, patch_size=1, mask_folder_name='masks', use_wandb=False, use_point=False, val_all=False, render_mask_type='composition', render_mask_instance_id=1, vis_pose=False, gui=True, W=512, H=512, radius=0.5, fovy=60, max_spp=1, data_type='mip')
+NeRFNetwork(
+  (grid): GridEncoder: input_dim=3 num_levels=16 level_dim=2 resolution=16 -> 4096 per_level_scale=1.4473 params=(6299960, 2) gridtype=hash align_corners=False interpolation=linear
+  (grid_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=32, out_features=64, bias=False)
+      (1): Linear(in_features=64, out_features=64, bias=False)
+      (2): Linear(in_features=64, out_features=16, bias=False)
+    )
+  )
+  (view_encoder): SHEncoder: input_dim=3 degree=4
+  (view_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=31, out_features=32, bias=False)
+      (1): Linear(in_features=32, out_features=32, bias=False)
+      (2): Linear(in_features=32, out_features=3, bias=False)
+    )
+  )
+  (m_grid): GridEncoder: input_dim=3 num_levels=16 level_dim=8 resolution=16 -> 512 per_level_scale=1.2599 params=(5258512, 8) gridtype=hash align_corners=False interpolation=linear
+  (mask_mlp): Sequential(
+    (0): SkipConnMLP(
+      (net): ModuleList(
+        (0): Linear(in_features=143, out_features=256, bias=False)
+        (1): Linear(in_features=256, out_features=256, bias=False)
+        (2): Linear(in_features=256, out_features=2, bias=False)
+      )
+    )
+  )
+  (prop_encoders): ModuleList(
+    (0): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 128 per_level_scale=1.6818 params=(383264, 2) gridtype=hash align_corners=False interpolation=linear
+    (1): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 256 per_level_scale=2.0000 params=(430080, 2) gridtype=hash align_corners=False interpolation=linear
+  )
+  (prop_mlp): ModuleList(
+    (0-1): 2 x MLP(
+      (net): ModuleList(
+        (0): Linear(in_features=10, out_features=16, bias=False)
+        (1): Linear(in_features=16, out_features=1, bias=False)
+      )
+    )
+  )
+)
+[INFO] Loading /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0005.pth ...
+[INFO] loaded model.
+[INFO] load at epoch 5, global step 1545
+[INFO] loaded scaler.
+[INFO] Trainer: ngp | 2023-09-04_14-38-13 | cuda | fp32 | /ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime
+[INFO] #parameters: 42170752
+Namespace(path='/ssddata/yliugu/teatime', workspace='/ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime', seed=0, ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0004.pth', fp16=False, with_sam=False, init_ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial1_teatime/checkpoints/ngp.pth', sam_ckpt='./pretrained/sam_vit_h_4b8939.pth', online_resolution=512, cache_size=256, cache_interval=4, save_cnt=20, eval_cnt=5, test=True, camera_traj='interp', train_split='train', test_split='val', preload=True, random_image_batch=True, downscale=1, bound=128, scale=-1, offset=[0, 0, 0], enable_cam_near_far=False, enable_cam_center=True, min_near=0.2, T_thresh=0.0001, iters=20000, lr=0.01, num_steps=[128, 64, 32], contract=True, background='last_sample', max_ray_batch=16384, density_thresh=10, num_rays=8192, adaptive_num_rays=True, num_points=262144, lambda_entropy=0, lambda_tv=0, lambda_wd=0, lambda_proposal=1, lambda_distort=0.02, with_mask=True, lightweight_mask=False, n_inst=2, label_regularization_weight=0.0, patch_size=1, mask_folder_name='masks', use_wandb=False, use_point=False, val_all=False, render_mask_type='composition', render_mask_instance_id=1, vis_pose=False, gui=True, W=512, H=512, radius=0.5, fovy=60, max_spp=1, data_type='mip')
+NeRFNetwork(
+  (grid): GridEncoder: input_dim=3 num_levels=16 level_dim=2 resolution=16 -> 4096 per_level_scale=1.4473 params=(6299960, 2) gridtype=hash align_corners=False interpolation=linear
+  (grid_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=32, out_features=64, bias=False)
+      (1): Linear(in_features=64, out_features=64, bias=False)
+      (2): Linear(in_features=64, out_features=16, bias=False)
+    )
+  )
+  (view_encoder): SHEncoder: input_dim=3 degree=4
+  (view_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=31, out_features=32, bias=False)
+      (1): Linear(in_features=32, out_features=32, bias=False)
+      (2): Linear(in_features=32, out_features=3, bias=False)
+    )
+  )
+  (m_grid): GridEncoder: input_dim=3 num_levels=16 level_dim=8 resolution=16 -> 512 per_level_scale=1.2599 params=(5258512, 8) gridtype=hash align_corners=False interpolation=linear
+  (mask_mlp): Sequential(
+    (0): SkipConnMLP(
+      (net): ModuleList(
+        (0): Linear(in_features=143, out_features=256, bias=False)
+        (1): Linear(in_features=256, out_features=256, bias=False)
+        (2): Linear(in_features=256, out_features=2, bias=False)
+      )
+    )
+  )
+  (prop_encoders): ModuleList(
+    (0): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 128 per_level_scale=1.6818 params=(383264, 2) gridtype=hash align_corners=False interpolation=linear
+    (1): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 256 per_level_scale=2.0000 params=(430080, 2) gridtype=hash align_corners=False interpolation=linear
+  )
+  (prop_mlp): ModuleList(
+    (0-1): 2 x MLP(
+      (net): ModuleList(
+        (0): Linear(in_features=10, out_features=16, bias=False)
+        (1): Linear(in_features=16, out_features=1, bias=False)
+      )
+    )
+  )
+)
+[INFO] Loading /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0004.pth ...
+[INFO] loaded model.
+[INFO] load at epoch 4, global step 1236
+[INFO] loaded scaler.
+[INFO] Trainer: ngp | 2023-09-04_14-38-44 | cuda | fp32 | /ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime
+[INFO] #parameters: 42170752
+Namespace(path='/ssddata/yliugu/teatime', workspace='/ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime', seed=0, ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0003.pth', fp16=False, with_sam=False, init_ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial1_teatime/checkpoints/ngp.pth', sam_ckpt='./pretrained/sam_vit_h_4b8939.pth', online_resolution=512, cache_size=256, cache_interval=4, save_cnt=20, eval_cnt=5, test=True, camera_traj='interp', train_split='train', test_split='val', preload=True, random_image_batch=True, downscale=1, bound=128, scale=-1, offset=[0, 0, 0], enable_cam_near_far=False, enable_cam_center=True, min_near=0.2, T_thresh=0.0001, iters=20000, lr=0.01, num_steps=[128, 64, 32], contract=True, background='last_sample', max_ray_batch=16384, density_thresh=10, num_rays=8192, adaptive_num_rays=True, num_points=262144, lambda_entropy=0, lambda_tv=0, lambda_wd=0, lambda_proposal=1, lambda_distort=0.02, with_mask=True, lightweight_mask=False, n_inst=2, label_regularization_weight=0.0, patch_size=1, mask_folder_name='masks', use_wandb=False, use_point=False, val_all=False, render_mask_type='composition', render_mask_instance_id=1, vis_pose=False, gui=True, W=512, H=512, radius=0.5, fovy=60, max_spp=1, data_type='mip')
+NeRFNetwork(
+  (grid): GridEncoder: input_dim=3 num_levels=16 level_dim=2 resolution=16 -> 4096 per_level_scale=1.4473 params=(6299960, 2) gridtype=hash align_corners=False interpolation=linear
+  (grid_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=32, out_features=64, bias=False)
+      (1): Linear(in_features=64, out_features=64, bias=False)
+      (2): Linear(in_features=64, out_features=16, bias=False)
+    )
+  )
+  (view_encoder): SHEncoder: input_dim=3 degree=4
+  (view_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=31, out_features=32, bias=False)
+      (1): Linear(in_features=32, out_features=32, bias=False)
+      (2): Linear(in_features=32, out_features=3, bias=False)
+    )
+  )
+  (m_grid): GridEncoder: input_dim=3 num_levels=16 level_dim=8 resolution=16 -> 512 per_level_scale=1.2599 params=(5258512, 8) gridtype=hash align_corners=False interpolation=linear
+  (mask_mlp): Sequential(
+    (0): SkipConnMLP(
+      (net): ModuleList(
+        (0): Linear(in_features=143, out_features=256, bias=False)
+        (1): Linear(in_features=256, out_features=256, bias=False)
+        (2): Linear(in_features=256, out_features=2, bias=False)
+      )
+    )
+  )
+  (prop_encoders): ModuleList(
+    (0): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 128 per_level_scale=1.6818 params=(383264, 2) gridtype=hash align_corners=False interpolation=linear
+    (1): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 256 per_level_scale=2.0000 params=(430080, 2) gridtype=hash align_corners=False interpolation=linear
+  )
+  (prop_mlp): ModuleList(
+    (0-1): 2 x MLP(
+      (net): ModuleList(
+        (0): Linear(in_features=10, out_features=16, bias=False)
+        (1): Linear(in_features=16, out_features=1, bias=False)
+      )
+    )
+  )
+)
+[INFO] Loading /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0003.pth ...
+[INFO] loaded model.
+[INFO] load at epoch 3, global step 927
+[INFO] loaded scaler.
+[INFO] Trainer: ngp | 2023-09-05_09-33-54 | cuda | fp32 | /ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime
+[INFO] #parameters: 42170752
+Namespace(path='/ssddata/yliugu/teatime', workspace='/ssddata/yliugu/Segment-Anything-NeRF/sam_mask_teatime', seed=0, ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0003.pth', fp16=False, with_sam=False, init_ckpt='/ssddata/yliugu/Segment-Anything-NeRF/trial1_teatime/checkpoints/ngp.pth', sam_ckpt='./pretrained/sam_vit_h_4b8939.pth', online_resolution=512, cache_size=256, cache_interval=4, save_cnt=20, eval_cnt=5, test=True, camera_traj='interp', train_split='train', test_split='val', preload=True, random_image_batch=True, downscale=1, bound=128, scale=-1, offset=[0, 0, 0], enable_cam_near_far=False, enable_cam_center=True, min_near=0.2, T_thresh=0.0001, iters=20000, lr=0.01, num_steps=[128, 64, 32], contract=True, background='last_sample', max_ray_batch=16384, density_thresh=10, num_rays=8192, adaptive_num_rays=True, num_points=262144, lambda_entropy=0, lambda_tv=0, lambda_wd=0, lambda_proposal=1, lambda_distort=0.02, with_mask=True, lightweight_mask=False, n_inst=2, label_regularization_weight=0.0, patch_size=1, mask_folder_name='masks', use_rgb_loss=False, use_wandb=False, use_point=False, val_all=False, render_mask_type='composition', render_mask_instance_id=1, vis_pose=False, gui=True, W=512, H=512, radius=0.5, fovy=60, max_spp=1, data_type='mip')
+NeRFNetwork(
+  (grid): GridEncoder: input_dim=3 num_levels=16 level_dim=2 resolution=16 -> 4096 per_level_scale=1.4473 params=(6299960, 2) gridtype=hash align_corners=False interpolation=linear
+  (grid_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=32, out_features=64, bias=False)
+      (1): Linear(in_features=64, out_features=64, bias=False)
+      (2): Linear(in_features=64, out_features=16, bias=False)
+    )
+  )
+  (view_encoder): SHEncoder: input_dim=3 degree=4
+  (view_mlp): MLP(
+    (net): ModuleList(
+      (0): Linear(in_features=31, out_features=32, bias=False)
+      (1): Linear(in_features=32, out_features=32, bias=False)
+      (2): Linear(in_features=32, out_features=3, bias=False)
+    )
+  )
+  (m_grid): GridEncoder: input_dim=3 num_levels=16 level_dim=8 resolution=16 -> 512 per_level_scale=1.2599 params=(5258512, 8) gridtype=hash align_corners=False interpolation=linear
+  (mask_mlp): Sequential(
+    (0): SkipConnMLP(
+      (net): ModuleList(
+        (0): Linear(in_features=143, out_features=256, bias=False)
+        (1): Linear(in_features=256, out_features=256, bias=False)
+        (2): Linear(in_features=256, out_features=2, bias=False)
+      )
+    )
+  )
+  (prop_encoders): ModuleList(
+    (0): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 128 per_level_scale=1.6818 params=(383264, 2) gridtype=hash align_corners=False interpolation=linear
+    (1): GridEncoder: input_dim=3 num_levels=5 level_dim=2 resolution=16 -> 256 per_level_scale=2.0000 params=(430080, 2) gridtype=hash align_corners=False interpolation=linear
+  )
+  (prop_mlp): ModuleList(
+    (0-1): 2 x MLP(
+      (net): ModuleList(
+        (0): Linear(in_features=10, out_features=16, bias=False)
+        (1): Linear(in_features=16, out_features=1, bias=False)
+      )
+    )
+  )
+)
+[INFO] Loading /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0003.pth ...
+[INFO] loaded model.
+[INFO] load at epoch 3, global step 927
+[INFO] loaded scaler.

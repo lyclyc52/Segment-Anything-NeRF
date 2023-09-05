@@ -139,7 +139,7 @@ def custom_meshgrid(*args):
 
 
 @torch.cuda.amp.autocast(enabled=False)
-def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='cpu'):
+def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='cpu', boundary_mask=None):
     ''' get rays
     Args:
         poses: [N/1, 4, 4], cam2world
@@ -986,6 +986,8 @@ class Trainer(object):
             # get remembered points coords first
             inputs_point_coords = None
             if self.point_3d is not None:
+                print(self.point_3d)
+                print()
                 point_3d = torch.cat([self.point_3d, torch.ones_like(
                     self.point_3d[:, :1])], axis=-1)  # [N, 4]
                 w2c = torch.inverse(data['poses'][0])  # [4, 4]

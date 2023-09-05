@@ -97,12 +97,24 @@ def main(args):
     predictor.set_image(image)
     
     
-    pts_3D = torch.tensor([[0.1217, -0.2355, -0.2479],
-                           [0.1513, -0.3258, -0.2918],
-                           [0.0298, -0.2842, -0.3166],
-                           [-0.1392, -0.3707, -0.1720],
-                           [-0.0608, -0.4495, -0.2166],
-                           [ 0.0748, -0.0510, -0.6848]])
+    # pts_3D = torch.tensor([[0.1217, -0.2355, -0.2479],
+    #                        [0.1513, -0.3258, -0.2918],
+    #                        [0.0298, -0.2842, -0.3166],
+    #                        [-0.1392, -0.3707, -0.1720],
+    #                        [-0.0608, -0.4495, -0.2166],
+    #                        [ 0.0748, -0.0510, -0.6848]])
+    
+    # pts_3D = torch.tensor([[0.0290, -0.2947, -0.3414],
+    #                        [0.0773, -0.3419, -0.3338]])
+
+    pts_3D = torch.tensor([[-0.0873, -0.2738, -0.3423],
+                            [ 0.0501, -0.3104, -0.3342],
+                            [ 0.0146, -0.2055, -0.3980],
+                            [ 0.0706, -0.3154, -0.1454],
+                            [ 0.0385, -0.4497, -0.3302],
+                            [-0.0648, -0.4514, -0.2964],
+                            [-0.1149, -0.5198, -0.3918],
+                            [-0.0710, -0.3939, -0.6091]])
 
     input_label = np.ones(pts_3D.shape[0])
     # print(extrinsics.shape, intrinsics.shape, images.shape, depths.shape, features.shape)
@@ -537,7 +549,7 @@ if __name__ == '__main__':
     parser.add_argument('--threshold', type=float, default=0.1)
     parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/pose_dir.json')
     parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/validation')
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/sam_masks')
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/masks')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     
     

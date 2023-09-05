@@ -303,8 +303,8 @@ class NeRFRenderer(nn.Module):
                     features = self.s_grid(xyzs, bound=self.bound)
 
                 if return_mask > 0:
-                    # masks = self.m_grid(xyzs, bound=self.bound)
-                    masks = colors
+                    masks = self.m_grid(xyzs, bound=self.bound)
+                    # masks = colors
 
             # sigmas to weights
             deltas = (real_bins[..., 1:] - real_bins[..., :-1])  # [N, T]
@@ -363,17 +363,20 @@ class NeRFRenderer(nn.Module):
             results['samvit'] = samvit_mlp
 
         if return_mask > 0:
-            # if not self.opt.lightweight_mask:
-            #     m = torch.cat([masks, geo_feat.detach()], dim=-1)
-            # else:
-            #     m = torch.cat([masks, colors.detach()], dim=-1)
-            # point_masks = self.mask_mlp(m)
-            # results['instance_mask_logits'] = torch.sum(
-            #     weights.detach().unsqueeze(-1) * point_masks, dim=-2)
-
-            # f_mask = torch.sum(weights.unsqueeze(-1) * masks, dim=-2)
-            m = torch.cat([f_image.detach(), image.detach(), depth.unsqueeze(-1).detach()], dim=-1)
+            if not self.opt.lightweight_mask:
+                m = torch.cat([masks, geo_feat.detach()], dim=-1)
+            else:
+                m = torch.cat([masks, colors.detach()], dim=-1)
             point_masks = self.mask_mlp(m)
-            results['instance_mask_logits'] = point_masks
+            results['instance_mask_logits'] = torch.sum(
+                weights.detach().unsqueeze(-1) * point_masks, dim=-2)
+
+            f_mask = torch.sum(weights.unsqueeze(-1) * masks, dim=-2)
+            
+            
+            
+            # m = torch.cat([f_image.detach(), image.detach(), depth.unsqueeze(-1).detach()], dim=-1)
+            # point_masks = self.mask_mlp(m)
+            # results['instance_mask_logits'] = point_masks
 
         return results

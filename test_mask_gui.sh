@@ -13,4 +13,4 @@ python main.py /ssddata/yliugu/teatime \
 --num_rays 8192 \
 --render_mask_instance 1 \
 --render_mask_type composition \
---ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0010.pth
+--ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_mask_teatime/checkpoints/ngp_ep0003.pth

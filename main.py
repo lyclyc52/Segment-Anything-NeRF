@@ -117,6 +117,10 @@ if __name__ == '__main__':
                         help='patch size in train sampling')
     parser.add_argument('--mask_folder_name', type=str,
                         default='masks', help="mask folder name")
+    parser.add_argument('--use_rgb_loss', action='store_true',
+                        help='use rgb similarity to help training')
+    
+    
     parser.add_argument('--use_wandb', action='store_true')
 
     # evaluation option
