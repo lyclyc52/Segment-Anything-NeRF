@@ -108,13 +108,15 @@ class NeRFNetwork(NeRFRenderer):
                 self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, 
                                                       log2_hashmap_size=19, desired_resolution=512)
                 self.mask_mlp = nn.Sequential(
-                    SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst, 256, 3, skip_layers=[], bias=False),
+                    SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst + self.opt.redundant_instance, 
+                                256, 3, skip_layers=[], bias=False),
                 )
             else:
                 self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=2, base_resolution=16, 
                                                       log2_hashmap_size=19, desired_resolution=512)
                 # self.mask_mlp = MLP(self.m_dim + self.geom_feat_dim + self.view_in_dim + 4, self.opt.n_inst, 64, 3, bias=False)
-                self.mask_mlp = MLP(self.geom_feat_dim + self.view_in_dim + 4, self.opt.n_inst, 64, 3, bias=False)
+
+                self.mask_mlp = MLP(self.geom_feat_dim + self.view_in_dim + 4, self.opt.redundant_instance + self.opt.n_inst, 64, 3, bias=False)
 
         # proposal network
         self.prop_encoders = nn.ModuleList()

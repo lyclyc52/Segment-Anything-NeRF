@@ -138,8 +138,11 @@ def custom_meshgrid(*args):
         return torch.meshgrid(*args, indexing='ij')
 
 
+
+
+
 @torch.cuda.amp.autocast(enabled=False)
-def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='cpu', boundary_mask=None):
+def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='cpu', incoherent_mask=None, include_incoherent_region=False):
     ''' get rays
     Args:
         poses: [N/1, 4, 4], cam2world
@@ -158,8 +161,10 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
 
     i, j = custom_meshgrid(torch.linspace(
         0, W-1, W, device=device), torch.linspace(0, H-1, H, device=device))  # float
+    
     i = i.t().contiguous().view(-1) + 0.5
     j = j.t().contiguous().view(-1) + 0.5
+
 
     results = {}
 
@@ -169,16 +174,29 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
             inds = coords[:, 0] * W + coords[:, 1]
 
         elif patch_size > 1:
+            if incoherent_mask is not None and include_incoherent_region:
+                incoherent_mask = incoherent_mask.view(-1, H*W)
+                rand_indices = torch.multinomial(incoherent_mask.to(torch.float32), 1)
+                
+                # rand_indices = torch.multinomial(incoherent_mask.view(-1, H*W).to(torch.float32), 1)
 
-            # random sample left-top cores.
-            num_patch = N // (patch_size ** 2)
+                mask_point_x = j[rand_indices]-0.5
+                mask_point_y = i[rand_indices]-0.5
+                # print(mask_point_x, mask_point_y)
+                inds_x = torch.clamp(mask_point_x-patch_size//2, min=0, max=H-patch_size-1).to(torch.int)
+                inds_y = torch.clamp(mask_point_y-patch_size//2, min=0, max=W-patch_size-1).to(torch.int)
+            else:
+                # random sample left-top cores.
+                num_patch = N // (patch_size ** 2)
 
-            inds_x = torch.randint(
-                0, H - patch_size, size=[num_patch], device=device)
-            inds_y = torch.randint(
-                0, W - patch_size, size=[num_patch], device=device)
+                inds_x = torch.randint(
+                    0, H - patch_size, size=[num_patch], device=device)
+                inds_y = torch.randint(
+                    0, W - patch_size, size=[num_patch], device=device)
+                
+
             inds = torch.stack([inds_x, inds_y], dim=-1)  # [np, 2]
-
+            
             # create meshgrid for each patch
             pi, pj = custom_meshgrid(torch.arange(
                 patch_size, device=device), torch.arange(patch_size, device=device))
@@ -188,7 +206,8 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
             inds = inds.unsqueeze(1) + offsets.unsqueeze(0)  # [np, p^2, 2]
             inds = inds.view(-1, 2)  # [N, 2]
             inds = inds[:, 0] * W + inds[:, 1]  # [N], flatten
-
+            
+  
         else:  # random sampling
             inds = torch.randint(
                 0, H*W, size=[N], device=device)  # may duplicate
@@ -198,7 +217,16 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
 
         results['i'] = i.long()
         results['j'] = j.long()
+        
+        # if incoherent_mask is not None:
+            # incoherent_mask = torch.gather(incoherent_mask.view(-1), -1, inds)
 
+            # sample_index = torch.masked_select(torch.arange(end=incoherent_mask.shape[0]).to(incoherent_mask.device), 
+            #                                    incoherent_mask.to(torch.bool))
+            # print(sample_index.shape)
+            
+            
+        # exit()
     else:
         inds = torch.arange(H*W, device=device)
 
@@ -604,6 +632,46 @@ class Trainer(object):
 
     # ------------------------------
 
+
+    def rgb_similarity_loss(self, rgb, inst_masks):
+
+        sample_index = torch.randint(0, rgb.size(0), size=[1]).to(inst_masks.device)
+        color_similarity_map = torch.norm(rgb-rgb[sample_index], dim=-1)
+        # color_similarity_map = color_similarity_map / color_similarity_map.max()
+        
+        similarity_map = color_similarity_map < self.opt.rgb_similarity_threshold
+        
+        
+        # rgb_save = rgb.view(-1, self.opt.patch_size, self.opt.patch_size, 3)
+        # cv2.imwrite(f'debug/{self.global_step}_rgb.png', cv2.cvtColor((rgb_save[0] * 255).cpu().numpy().astype(np.uint8), cv2.COLOR_RGB2BGR))
+        # similarity_map_save = similarity_map.view(-1, self.opt.patch_size, self.opt.patch_size)
+        # cv2.imwrite(f'debug/{self.global_step}_similarity.png', (similarity_map_save[0] * 255).cpu().numpy().astype(np.uint8))
+        
+        
+        sample_mask = inst_masks[sample_index]
+        # sample_mask = sample_mask / torch.norm(sample_mask, dim=-1, keepdim=True)
+        
+
+        
+        if self.opt.redundant_instance > 0:
+            pred_masks_similarity = F.cosine_similarity(inst_masks, sample_mask, dim=-1)
+            pred_masks_similarity = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.rgb_similarity_epsilon) 
+            labels = 1. - similarity_map.to(torch.int)
+
+            rgb_loss = F.binary_cross_entropy(pred_masks_similarity, labels, reduction='mean')
+        else:
+            rgb_similar_mask = inst_masks[similarity_map]
+            pred_masks_similarity = F.cosine_similarity(rgb_similar_mask, sample_mask, dim=-1)
+            pred_masks_similarity = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.rgb_similarity_epsilon) 
+
+            rgb_loss = pred_masks_similarity.mean()
+        # label = torch.zeros(pred_masks_similarity.shape[0], requires_grad=False).to(pred_masks_similarity.device)
+        # loss = F.binary_cross_entropy(pred_masks_similarity, label, reduction='mean')
+
+        
+        return rgb_loss
+    
+    
     def label_regularization(self, depth, pred_masks):
         '''
         depth: [B, N]
@@ -713,29 +781,47 @@ class Trainer(object):
                                             perturb=False, cam_near_far=cam_near_far, update_proposal=False, return_feats=0, return_mask=1)
 
                 # [B, N, num_instances]
-                pred_masks = outputs['instance_mask_logits']
+                inst_masks = outputs['instance_mask_logits']
+ 
                 # [B*N, num_instances]
-                pred_masks_flattened = pred_masks.view(-1, self.opt.n_inst)
+                
                 gt_masks_flattened = gt_mask.view(-1)  # [B*N]
 
                 labeled = gt_masks_flattened != -1  # only compute loss for labeled pixels
+                
+                inst_masks = torch.softmax(
+                    inst_masks, dim=-1)  # [B, N, num_instances + k]
+                pred_masks = torch.stack([inst_masks[..., :-1].sum(-1), inst_masks[..., -1]], -1)
+                
+                pred_masks_flattened = pred_masks.view(-1, 2)
+                pred_masks_flattened = torch.clamp(pred_masks_flattened, min=self.opt.rgb_similarity_epsilon, max=1-self.opt.rgb_similarity_epsilon)
+ 
                 if labeled.sum() > 0:
                     # [B*N], loss fn with reduction='none'
-                    loss = self.criterion(
-                        pred_masks_flattened[labeled], gt_masks_flattened[labeled])
+
+                    loss = -torch.log(torch.gather(pred_masks_flattened[labeled], -1, gt_masks_flattened[labeled][..., None]))
+                    
                 else:
                     loss = torch.tensor(0).to(
                         pred_masks_flattened.dtype).to(self.device)
-
+                
+                if self.opt.incoherent_uncertainty_weight < 1:
+                    loss = (1 - data['incoherent_masks'] + self.opt.incoherent_uncertainty_weight * data['incoherent_masks']) * loss
+                
+                
                 loss = loss.mean()
-
+                    
                 if self.opt.label_regularization_weight > 0:
                     loss = loss + self.label_regularization(
                         outputs['depth'].detach(), pred_masks) * self.opt.label_regularization_weight
+                if self.opt.rgb_similarity_loss_weight > 0:
+                    
+                    loss = loss + self.rgb_similarity_loss(
+                        outputs['image'].detach(), inst_masks) * self.opt.rgb_similarity_loss_weight
 
-                pred_masks = torch.softmax(
-                    pred_masks, dim=-1)  # [B, N, num_instances]
+                    
                 pred_masks = pred_masks.argmax(dim=-1)  # [B, N]
+                    
 
                 return pred_masks, gt_mask, loss
 
@@ -821,22 +907,38 @@ class Trainer(object):
         else:
             if self.opt.with_mask:
                 gt_mask = data['masks'].to(torch.long)
-                pred_mask = outputs['instance_mask_logits'].reshape(H, W, -1)
+                inst_masks = outputs['instance_mask_logits'].reshape(H, W, -1)
 
                 # [B*H*W, num_instances]
-                pred_mask_flattened = pred_mask.view(-1, self.opt.n_inst)
+                # pred_mask_flattened = pred_mask.view(-1, self.opt.n_inst)
                 gt_mask_flattened = gt_mask.view(-1)  # [B*H*W]
 
                 labeled = gt_mask_flattened != -1  # only compute loss for labeled pixels
-                loss = self.criterion(
-                    pred_mask_flattened[labeled], gt_mask_flattened[labeled]).mean()
+                
+                
+                inst_masks = torch.softmax(
+                    inst_masks, dim=-1)  # [B, N, num_instances + k]
+                pred_mask = torch.stack([inst_masks[..., :-1].sum(-1), inst_masks[..., -1]], -1)
+                pred_mask_flattened = pred_mask.view(-1, 2)
+ 
+                pred_mask_flattened = torch.clamp(pred_mask_flattened, min=self.opt.rgb_similarity_epsilon, max=1-self.opt.rgb_similarity_epsilon)
+ 
+                if labeled.sum() > 0:
+                    loss = -torch.log(torch.gather(pred_mask_flattened[labeled], -1, gt_mask_flattened[labeled][..., None]))
+                else:
+                    loss = torch.tensor(0).to(
+                        pred_mask_flattened.dtype).to(self.device)
+                loss = loss.mean()
 
                 if self.opt.label_regularization_weight > 0:
                     loss = loss + self.label_regularization(
                         outputs['depth'].detach(), pred_mask) * self.opt.label_regularization_weight
 
                 # [B, H, W, num_instances]
-                pred_mask = torch.softmax(pred_mask, dim=-1)
+                # if self.opt.n_inst > 1: 
+                #     pred_mask = torch.softmax(pred_mask, dim=-1)
+                # else:
+                #     pred_masks = torch.sigmoid(pred_masks)
                 # pred_mask = pred_mask.argmax(dim=-1) # [B, H, W]
 
                 # pred_seg = overlay_mask(pred_rgb, pred_mask)
@@ -905,9 +1007,14 @@ class Trainer(object):
         pred_depth = outputs['depth'].reshape(H, W)
 
         if self.opt.with_mask:
-            pred_mask = outputs['instance_mask_logits'].reshape(
-                H, W, self.opt.n_inst)
-            pred_mask = torch.softmax(pred_mask, dim=-1)
+            inst_mask = outputs['instance_mask_logits'].reshape(
+                H, W, self.opt.n_inst + self.opt.redundant_instance)
+            
+            if self.opt.n_inst > 1:
+                inst_mask = torch.softmax(inst_mask, dim=-1)                
+                pred_mask = torch.stack([inst_mask[..., :-1].sum(-1), inst_mask[..., -1]], -1)
+            else:
+                pred_mask = torch.sigmoid(inst_mask)
 
             if self.opt.render_mask_type == 'heatmap':
                 if self.opt.render_mask_instance_id >= 0 and self.opt.render_mask_instance_id < self.opt.n_inst:

@@ -91,49 +91,56 @@ def main(args):
     predictor = SamPredictor(sam)
     pts_3D = None
 
-    rgb_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[0]}_rgb.png')
+    rgb_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[0]}_rgb.png')
     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     predictor.set_image(image)
     
     
-    # pts_3D = torch.tensor([[0.1217, -0.2355, -0.2479],
-    #                        [0.1513, -0.3258, -0.2918],
-    #                        [0.0298, -0.2842, -0.3166],
-    #                        [-0.1392, -0.3707, -0.1720],
-    #                        [-0.0608, -0.4495, -0.2166],
-    #                        [ 0.0748, -0.0510, -0.6848]])
-    
-    # pts_3D = torch.tensor([[0.0290, -0.2947, -0.3414],
-    #                        [0.0773, -0.3419, -0.3338]])
 
-    pts_3D = torch.tensor([[-0.0873, -0.2738, -0.3423],
-                            [ 0.0501, -0.3104, -0.3342],
-                            [ 0.0146, -0.2055, -0.3980],
-                            [ 0.0706, -0.3154, -0.1454],
-                            [ 0.0385, -0.4497, -0.3302],
-                            [-0.0648, -0.4514, -0.2964],
-                            [-0.1149, -0.5198, -0.3918],
-                            [-0.0710, -0.3939, -0.6091]])
+
+    # pts_3D = torch.tensor([[-0.0873, -0.2738, -0.3423],
+    #                         [ 0.0501, -0.3104, -0.3342],
+    #                         [ 0.0146, -0.2055, -0.3980],
+    #                         [ 0.0706, -0.3154, -0.1454],
+    #                         [ 0.0385, -0.4497, -0.3302],
+    #                         [-0.0648, -0.4514, -0.2964],
+    #                         [-0.1149, -0.5198, -0.3918],
+    #                         [-0.0710, -0.3939, -0.6091]])
+    
+    pts_3D = torch.tensor([[-0.0956, -0.4185, -0.3230],
+                            [-0.0135, -0.3071, -0.1701],
+                            [ 0.0014, -0.2761, -0.3728],
+                            [-0.1080, -0.2990, -0.3226],
+                            [-0.1104, -0.5073, -0.3695],
+                            [ 0.0226, -0.3977, -0.2522],
+                            [-0.0048, -0.5092, -0.3536],
+                            [ 0.0386, -0.4081, -0.4083],
+                            [ 0.0169, -0.4760, -0.4811],
+                            [-0.0047, -0.1596, -0.4147]])
 
     input_label = np.ones(pts_3D.shape[0])
-    # print(extrinsics.shape, intrinsics.shape, images.shape, depths.shape, features.shape)
+    input_label[-1] = 0 
     for i in tqdm.tqdm(range(len(frame_names))):
 
-        rgb_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_rgb.png')
-        depth_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_depth.npy')
-        feature_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_sam.npy')
+        rgb_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[i]}_rgb.png')
+        depth_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[i]}_depth.npy')
+        feature_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[i]}_sam.npy')
+        
+        image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
+        r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
         p,n = poses[frame_names[i]], intrinsics
         p = np.array(p).astype(np.float32)
-        p[:,1] = -p[:, 1]
-        p[:,2] = -p[:, 2]
+        # p[:,1] = -p[:, 1]
+        # p[:,2] = -p[:, 2]
         output_file = os.path.join(output_root, f'{frame_names[i]}_masks.npy')
       
 
         d = np.load(depth_name)[..., None]
 
 
-        pts_2D, pts_depth = project_to_2d(pts_3D, p, n)
+        pts_2D, pts_depth = project_to_2d(pts_3D, p, n, H = r.shape[0], W = r.shape[1])
         
         valid =  np.logical_and.reduce((pts_2D[..., 1] < d.shape[0], pts_2D[..., 0] < d.shape[1],
             pts_2D[..., 1] >= 0, pts_2D[..., 0] >=0))
@@ -181,8 +188,7 @@ def main(args):
         
         
         
-        image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
-        r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
         if args.use_nerf_feature:
             f = np.load(feature_name)[0]
             f = downsample_sam_feature(f)
@@ -346,7 +352,6 @@ def get_3d_pts():
             plt.axis('on')
             plt.savefig(output_file)
             plt.close()
-        print(pts_3D)
         break
 
 
@@ -508,22 +513,28 @@ def project_to_3d(pts, pose, intrinsics, depth):
     rays_o = rays_o[None, :]
     return rays_o + rays_d
 
-def project_to_2d(pts, pose, intrinsics):
+def project_to_2d(pts, pose, intrinsics, H, W):
+
     fx, fy, cx, cy = intrinsics
     pose = torch.tensor(pose)
-    pose = torch.inverse(pose)
-    
-    camera_pts = pts @ pose[:3, :3].T
-    camera_pts = camera_pts + pose[:3,3]
+    w2c = torch.inverse(pose)
 
-    camera_x = camera_pts[..., 0] / camera_pts[..., -1] * fx + cx
-    camera_y = camera_pts[..., 1] / camera_pts[..., -1] * fy + cy
     
-    pts_depth = torch.norm(camera_pts, dim=-1)
-    sign = torch.ones_like(pts_depth)
-    sign[camera_pts[..., -1] < 0.] = -1.
+    pts = torch.concat([pts, torch.ones([pts.size(0), 1])], -1)
+    camera_pts = pts @ w2c.T
+    camera_pts = camera_pts[..., :-1]
     
-    return torch.stack([camera_x, camera_y], dim = -1).to(torch.int), pts_depth * sign
+
+    camera_x = W - (camera_pts[..., 0] / camera_pts[..., 2] * fx + cx)
+    camera_y = camera_pts[..., 1] / camera_pts[..., 2] * fy + cy
+    
+    # pts_depth = torch.norm(camera_pts, dim=-1)
+    # pts_depth = pts_depth 
+
+    
+    pts_depth = -camera_pts[..., 2]
+    
+    return torch.stack([camera_x, camera_y], dim = -1).to(torch.int), pts_depth
 
 def create_video():
     input_path = '/disk1/yliugu/Grounded-Segment-Anything/outputs/3dfront_0089/video'
@@ -544,12 +555,12 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
-    parser.add_argument('--device', type=str, default='cuda:3')
+    parser.add_argument('--device', type=str, default='cuda:1')
     parser.add_argument('--model_type', type=str, default='vit_h')
     parser.add_argument('--threshold', type=float, default=0.1)
-    parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/pose_dir.json')
-    parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/validation')
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/masks')
+    parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/pose_dir.json')
+    parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/validation')
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/sheep_masks')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     
     

@@ -117,8 +117,25 @@ if __name__ == '__main__':
                         help='patch size in train sampling')
     parser.add_argument('--mask_folder_name', type=str,
                         default='masks', help="mask folder name")
-    parser.add_argument('--use_rgb_loss', action='store_true',
-                        help='use rgb similarity to help training')
+    
+    parser.add_argument('--incoherent_uncertainty_weight', type=float, default=1,
+                        help='uncertainty weight applied on the incoherent regions')
+    parser.add_argument('--rgb_similarity_loss_weight', type=float, default=0,
+                        help="rgb similarity loss weight")
+    parser.add_argument('--rgb_similarity_threshold', type=float, default=0.3,
+                        help="rgb similarity loss weight") 
+    parser.add_argument('--rgb_similarity_epsilon', type=float, default=0.000001,
+                        help="avoid log zero in BCE loss") 
+    parser.add_argument('--rgb_similarity_exp_weight', type=float, default=10,
+                        help="adjust the number of the similarity function") 
+    parser.add_argument('--redundant_instance', type=int, default=0,
+                        help='redundant instance output for local contrastive learning')
+    
+    
+    
+    
+    
+    # parser.add_argument('--local_patch_size', type=int, default=)
     
     
     parser.add_argument('--use_wandb', action='store_true')
@@ -174,7 +191,14 @@ if __name__ == '__main__':
 
     from nerf.network import NeRFNetwork
 
-    criterion = torch.nn.CrossEntropyLoss(reduction='none') if opt.with_mask else torch.nn.MSELoss(reduction='none')
+    if opt.with_mask:
+        if opt.n_inst > 1:
+            criterion = torch.nn.CrossEntropyLoss(reduction='none')   
+        else:
+            criterion = torch.nn.BCEWithLogitsLoss(reduction='none')  
+        
+    else: 
+        criterion = torch.nn.MSELoss(reduction='none')
     # criterion = torch.nn.SmoothL1Loss(reduction='none')
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

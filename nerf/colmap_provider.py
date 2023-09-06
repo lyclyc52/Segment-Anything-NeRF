@@ -19,7 +19,7 @@ from .colmap_utils import *
 
 
 
-def get_incoherent_mask(input_masks, sfact=2):
+def get_incoherent_mask(input_masks, sfact=2, keep_size=True):
     mask = input_masks.float()
     w = input_masks.shape[-1]
     h = input_masks.shape[-2]
@@ -29,6 +29,10 @@ def get_incoherent_mask(input_masks, sfact=2):
     mask_uncertain = F.interpolate(
         mask_residue, (h//sfact, w//sfact), mode='bilinear')
     mask_uncertain[mask_uncertain >= 0.01] = 1.
+    
+    if keep_size:
+        mask_uncertain = F.interpolate(
+            mask_uncertain, (h,w), mode='nearest')
 
     return mask_uncertain
 
@@ -359,7 +363,7 @@ class ColmapDataset:
         
         else:
             all_ids = np.arange(len(img_paths))
-            val_ids = all_ids[::8]
+            val_ids = all_ids[::16]
             if self.opt.val_all:
                 val_ids = all_ids
 
@@ -401,24 +405,40 @@ class ColmapDataset:
             else:
                 self.images = None
                 
-            
+            def validate_file(file_name):
+                file_id = int(file_name[-15:-10])
+                return_value = file_id <= 33 or (file_id >=53 and file_id <=54 ) or (file_id >= 106 and file_id <=137) or \
+                    (file_id >= 145 and file_id <= 161) or file_id == 176
+                return return_value
             if self.opt.with_mask:
                 self.masks = []
-                self.boundary_masks = []
                 self.valid_mask_index = []
                 for idx in tqdm.tqdm(range(len(mask_paths)), desc=f'Loading {self.type} mask'):
                     f = mask_paths[idx]
                     f = f.replace('.jpg', '_masks.npy')
                     mask = torch.from_numpy(np.load(f))
-                    if mask.sum()>=10:
+                    
+                    
+                    if mask.sum()>=10 and validate_file(f):
                         self.valid_mask_index.append(idx)
                     self.masks.append(mask.to(int))
 
                 self.masks = torch.stack(self.masks, axis=0)
-                self.incoherent_masks = get_incoherent_mask(self.masks.permute(0,3,1,2))
+                if self.opt.rgb_similarity_loss_weight > 0 or self.opt.incoherent_uncertainty_weight < 1:
+                    self.incoherent_masks = get_incoherent_mask(self.masks.permute(0,3,1,2), sfact=2)                    
+                    self.incoherent_masks = self.incoherent_masks.permute(0,2,3,1).to(torch.bool)[..., 0]
+                    # np.save('debug/incoherent.npy', self.incoherent_masks.numpy())
+                else:
+                    self.incoherent_masks = None
+                    
+                    
+                # self.valid_mask_index = np.array(self.valid_mask_index)
+                
+                
 
             else:
                 self.masks = None
+                self.incoherent_masks = None
 
         # view all poses.
         if self.opt.vis_pose:
@@ -427,7 +447,6 @@ class ColmapDataset:
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
         
         if self.opt.val_all:
-            print(len(self.poses))
             pose_dict = {}
             for i in range(len(self.img_names)):
                 pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
@@ -438,8 +457,6 @@ class ColmapDataset:
         if self.images is not None:
             self.images = torch.from_numpy(self.images.astype(np.uint8)) # [N, H, W, C]
             
-
-
         if self.preload:
             self.intrinsics = self.intrinsics.to(self.device)
             self.poses = self.poses.to(self.device)
@@ -447,7 +464,8 @@ class ColmapDataset:
                 self.images = self.images.to(self.device)
             if self.masks is not None:
                 self.masks = self.masks.to(self.device)
-                self.boundary_masks = self.masks.to(self.device)
+            if self.incoherent_masks is not None:
+                self.incoherent_masks = self.incoherent_masks.to(self.device)
             if self.cam_near_far is not None:
                 self.cam_near_far = self.cam_near_far.to(self.device)
 
@@ -493,9 +511,14 @@ class ColmapDataset:
     
         results = {'H': H, 'W': W}
 
-        boundary_mask = self.boundary_masks[index][0] if self.boundary_masks is not None else None
+
+        incoherent_mask = self.incoherent_masks[index] if self.incoherent_masks is not None else None
+        include_incoherent_region = torch.randint(0, 2, size=[1]) > 0
+        
+
         rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu', 
-                        patch_size=self.opt.patch_size if self.opt.with_mask else 1, boundary_mask=boundary_mask)
+                        patch_size=self.opt.patch_size if self.opt.with_mask else 1, incoherent_mask=incoherent_mask,
+                        include_incoherent_region=include_incoherent_region[0])
 
 
         img_names = [self.img_names[i] for i in index]
@@ -526,8 +549,19 @@ class ColmapDataset:
             if self.training:
                 C = self.masks.shape[-1]
                 masks = masks.view(-1, C)
-
             results['masks'] = masks.to(self.device)
+            
+        if self.incoherent_masks is not None:
+            if num_rays != -1:
+                incoherent_masks = self.incoherent_masks[index, rays['j'], rays['i']] # [N]
+            else:
+                incoherent_masks = self.incoherent_masks[index].squeeze(0) # [H, W]
+                
+                
+            if self.training:
+                incoherent_masks = masks.view(-1)
+            results['incoherent_masks'] = incoherent_masks.to(self.device)
+            
         
         if self.opt.enable_cam_near_far and self.cam_near_far is not None:
             cam_near_far = self.cam_near_far[index] # [1/N, 2]
