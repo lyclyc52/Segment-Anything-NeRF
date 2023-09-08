@@ -20,11 +20,17 @@ class MLP(nn.Module):
 
         self.net = nn.ModuleList(net)
     
-    def forward(self, x):
+    def forward(self, x, save_intermedian_results=True):
+        
+        if save_intermedian_results:
+            self.intermedian_reuslts = []
         for l in range(self.num_layers):
             x = self.net[l](x)
             if l != self.num_layers - 1:
                 x = F.relu(x, inplace=True)
+                
+            if save_intermedian_results:
+                self.intermedian_reuslts.append(x.detach())
         return x
 
 class SkipConnMLP(nn.Module):
@@ -104,20 +110,32 @@ class NeRFNetwork(NeRFRenderer):
                 nn.LayerNorm(256),
             )
         elif self.opt.with_mask:
-            if not self.opt.lightweight_mask:
+            if self.opt.mask_mlp_type == 'default':
                 self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, 
                                                       log2_hashmap_size=19, desired_resolution=512)
-                self.mask_mlp = nn.Sequential(
-                    SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst + self.opt.redundant_instance, 
-                                256, 3, skip_layers=[], bias=False),
-                )
-            else:
+                self.mask_mlp = nn.Sequential(SkipConnMLP(self.m_dim + self.geom_feat_dim, self.opt.n_inst + self.opt.redundant_instance, 
+                                                      256, 3, skip_layers=[], bias=False),)
+                
+            elif self.opt.mask_mlp_type == 'lightweight_mask':
                 self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=2, base_resolution=16, 
-                                                      log2_hashmap_size=19, desired_resolution=512)
+                                                      log2_hashmap_size=10, desired_resolution=256)
                 # self.mask_mlp = MLP(self.m_dim + self.geom_feat_dim + self.view_in_dim + 4, self.opt.n_inst, 64, 3, bias=False)
 
                 self.mask_mlp = MLP(self.geom_feat_dim + self.view_in_dim + 4, self.opt.redundant_instance + self.opt.n_inst, 64, 3, bias=False)
-
+            elif self.opt.mask_mlp_type == 'adaptive':
+                self.mask_mlp = []
+                self.mask_mlp.append(nn.Linear(64, 32, bias=False))
+                self.mask_mlp.append(nn.Linear(64+32, 32, bias=False))
+                self.mask_mlp.append(nn.Linear(16+32, 32, bias=False))
+                
+                self.mask_mlp.append(nn.Linear(32+32, 32, bias=False))
+                self.mask_mlp.append(nn.Linear(32+32, 32, bias=False))
+                
+                
+                self.mask_mlp = nn.ModuleList(self.mask_mlp)
+                    
+                    
+                    
         # proposal network
         self.prop_encoders = nn.ModuleList()
         self.prop_mlp = nn.ModuleList()
@@ -133,21 +151,21 @@ class NeRFNetwork(NeRFRenderer):
         self.prop_encoders.append(prop1_encoder)
         self.prop_mlp.append(prop1_mlp)
 
-    def common_forward(self, x):
+    def common_forward(self, x, save_intermedian_results=False):
 
         f = self.grid(x, bound=self.bound)
-        f = self.grid_mlp(f)
+        f = self.grid_mlp(f, save_intermedian_results)
 
         sigma = trunc_exp(f[..., 0])
         feat = f[..., 1:]
     
         return sigma, feat
 
-    def forward(self, x, d, **kwargs):
+    def forward(self, x, d, save_intermedian_results=False, **kwargs):
         # x: [N, 3], in [-bound, bound]
         # d: [N, 3], nomalized in [-1, 1]
         
-        sigma, feat = self.common_forward(x)
+        sigma, feat = self.common_forward(x, save_intermedian_results)
 
         d = self.view_encoder(d)
         
@@ -208,10 +226,15 @@ class NeRFNetwork(NeRFRenderer):
             ])
 
         if self.opt.with_mask:
-            params.extend([
-                {'params': self.m_grid.parameters(), 'lr': lr},
-                {'params': self.mask_mlp.parameters(), 'lr':lr}
-            ])
+            if self.opt.mask_mlp_type == 'default' or self.opt.mask_mlp_type == 'lightweight_mask':
+                params.extend([
+                    {'params': self.m_grid.parameters(), 'lr': lr},
+                    {'params': self.mask_mlp.parameters(), 'lr':lr}
+                ])
+            elif self.opt.mask_mlp_type == 'adaptive':
+                params.extend([
+                    {'params': self.mask_mlp.parameters(), 'lr':lr}
+                ])
 
         return params
     

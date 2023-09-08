@@ -798,7 +798,6 @@ class Trainer(object):
  
                 if labeled.sum() > 0:
                     # [B*N], loss fn with reduction='none'
-
                     loss = -torch.log(torch.gather(pred_masks_flattened[labeled], -1, gt_masks_flattened[labeled][..., None]))
                     
                 else:
@@ -928,6 +927,7 @@ class Trainer(object):
                 else:
                     loss = torch.tensor(0).to(
                         pred_mask_flattened.dtype).to(self.device)
+                    
                 loss = loss.mean()
 
                 if self.opt.label_regularization_weight > 0:

@@ -294,7 +294,7 @@ class NeRFRenderer(nn.Module):
                 # last iter: query nerf
                 dirs = rays_d.view(-1, 1, 3).expand_as(xyzs)  # [N, T, 3]
                 dirs = dirs / torch.norm(dirs, dim=-1, keepdim=True)
-                outputs = self(xyzs, dirs)
+                outputs = self(xyzs, dirs, save_intermedian_results = self.opt.with_mask and self.opt.mask_mlp_type == 'adaptive')
                 sigmas = outputs['sigma']
                 colors = outputs['color']
                 geo_feat = outputs['geo_feat']
@@ -302,7 +302,7 @@ class NeRFRenderer(nn.Module):
                 if return_feats > 0:
                     features = self.s_grid(xyzs, bound=self.bound)
 
-                if return_mask > 0:
+                if return_mask > 0 and (self.opt.mask_mlp_type == 'default' or self.opt.mask_mlp_type == 'lightweight_mask'):
                     masks = self.m_grid(xyzs, bound=self.bound)
                     # masks = colors
 
@@ -334,11 +334,18 @@ class NeRFRenderer(nn.Module):
 
         depth = torch.sum(weights * rays_t, dim=-1)  # [N]
 
-        f_image = torch.sum(weights.unsqueeze(-1) * colors, dim=-2)  # [N, C]
-        image = torch.sigmoid(self.view_mlp(f_image))  # [N, 3]
+
+        f_image = torch.sum(weights.unsqueeze(-1) * colors, dim=-2) 
+        if self.opt.sum_after_mlp:
+            f_colors = self.view_mlp(colors, save_intermedian_results = self.opt.with_mask and self.opt.mask_mlp_type == 'adaptive')
+            f_colors = torch.sum(weights.unsqueeze(-1) * f_colors, dim=-2)
+            image = torch.sigmoid(f_colors)
+        else:
+            # f_image = torch.sum(weights.unsqueeze(-1) * colors, dim=-2)  # [N, C]
+            image = torch.sigmoid(self.view_mlp(f_image, save_intermedian_results = self.opt.with_mask and self.opt.mask_mlp_type == 'adaptive'))  # [N, 3]
 
         # extra results
-        if self.training:
+        if self.training and (not self.opt.with_mask and not self.opt.with_sam):
             results['num_points'] = xyzs.shape[0] * xyzs.shape[1]
             results['weights'] = weights
 
@@ -363,15 +370,25 @@ class NeRFRenderer(nn.Module):
             results['samvit'] = samvit_mlp
 
         if return_mask > 0:
-            if not self.opt.lightweight_mask:
+            if self.opt.mask_mlp_type == 'default':
                 m = torch.cat([masks, geo_feat.detach()], dim=-1)
-            else:
+                point_masks = self.mask_mlp(m)
+            elif self.opt.mask_mlp_type == 'lightweight_mask':
                 m = torch.cat([masks, colors.detach()], dim=-1)
-            point_masks = self.mask_mlp(m)
+                point_masks = self.mask_mlp(m)
+            elif self.opt.mask_mlp_type == 'adaptive':
+                m = self.mask_mlp[0](self.grid_mlp.intermedian_reuslts[0])
+                m = self.mask_mlp[1](torch.cat([self.grid_mlp.intermedian_reuslts[1], m], dim=-1))
+                m = self.mask_mlp[2](torch.cat([self.grid_mlp.intermedian_reuslts[2], m], dim=-1))
+                print(self.view_mlp.intermedian_reuslts[0].shape)
+                print(m.shape)
+                exit()
+                m = self.mask_mlp[3](torch.cat([self.view_mlp.intermedian_reuslts[0], m], dim=-1))
+                point_masks = self.mask_mlp[4](torch.cat([self.view_mlp.intermedian_reuslts[1], m], dim=-1))
             results['instance_mask_logits'] = torch.sum(
                 weights.detach().unsqueeze(-1) * point_masks, dim=-2)
 
-            f_mask = torch.sum(weights.unsqueeze(-1) * masks, dim=-2)
+            # f_mask = torch.sum(weights.unsqueeze(-1) * masks, dim=-2)
             
             
             

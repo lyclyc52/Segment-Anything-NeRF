@@ -172,6 +172,7 @@ class ColmapDataset:
         
         
         if self.opt.with_mask:
+
             mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
             mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
 
@@ -407,22 +408,34 @@ class ColmapDataset:
                 
             def validate_file(file_name):
                 file_id = int(file_name[-15:-10])
-                return_value = file_id <= 33 or (file_id >=53 and file_id <=54 ) or (file_id >= 106 and file_id <=137) or \
-                    (file_id >= 145 and file_id <= 161) or file_id == 176
-                return return_value
+                # return_value = file_id <= 30 or (file_id >=53 and file_id <=54 ) or (file_id >= 122 and file_id <=135) or \
+                #     (file_id >= 171 and file_id <= 177) 
+                
+                # return_value = file_id <= 30 and file_id >=2
+                # return return_value
+                
+                return True
+            
+            
             if self.opt.with_mask:
                 self.masks = []
                 self.valid_mask_index = []
+        
+                with open(os.path.join(mask_folder, 'valid.json')) as f:
+                    valid_dict = json.load(f)
+                    
                 for idx in tqdm.tqdm(range(len(mask_paths)), desc=f'Loading {self.type} mask'):
                     f = mask_paths[idx]
-                    f = f.replace('.jpg', '_masks.npy')
+                    
+                    f = f.replace('.jpg', '_masks.npy').replace('.JPG', '_masks.npy').replace('.png', '_masks.npy').replace('.PNG', '_masks.npy')
                     mask = torch.from_numpy(np.load(f))
                     
                     
-                    if mask.sum()>=10 and validate_file(f):
+                    if mask.sum()>=10 and validate_file(f) and valid_dict[img_names[idx][:-4]]:
                         self.valid_mask_index.append(idx)
+                        
+                
                     self.masks.append(mask.to(int))
-
                 self.masks = torch.stack(self.masks, axis=0)
                 if self.opt.rgb_similarity_loss_weight > 0 or self.opt.incoherent_uncertainty_weight < 1:
                     self.incoherent_masks = get_incoherent_mask(self.masks.permute(0,3,1,2), sfact=2)                    
@@ -430,8 +443,11 @@ class ColmapDataset:
                     # np.save('debug/incoherent.npy', self.incoherent_masks.numpy())
                 else:
                     self.incoherent_masks = None
-                    
-                    
+                
+                self.valid_mask_index = self.valid_mask_index[::8]
+                # self.valid_mask_index = []
+                # print(len(self.valid_mask_index))
+                # exit()
                 # self.valid_mask_index = np.array(self.valid_mask_index)
                 
                 
@@ -513,7 +529,8 @@ class ColmapDataset:
 
 
         incoherent_mask = self.incoherent_masks[index] if self.incoherent_masks is not None else None
-        include_incoherent_region = torch.randint(0, 2, size=[1]) > 0
+        # include_incoherent_region = torch.randint(0, 1, size=[1]) > 0
+        include_incoherent_region = torch.tensor([0])
         
 
         rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu', 

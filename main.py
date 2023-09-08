@@ -4,7 +4,7 @@ import sys
 import os.path as osp
 
 from nerf.utils import *
-from segment_anything import build_sam, SamPredictor
+from segment_anything import build_sam, sam_model_registry_baseline, SamPredictor
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -107,8 +107,8 @@ if __name__ == '__main__':
     # train mask options
     parser.add_argument('--with_mask', action='store_true',
                         help="train/test with mask of some object")
-    parser.add_argument('--lightweight_mask', action='store_true',
-                        help='use lightweight mask hashgrid and mlp')
+    parser.add_argument('--mask_mlp_type', type=str,
+                        default='default', choices=['default', 'lightweight_mask', 'adaptive'])
     parser.add_argument('--n_inst', type=int, default=2,
                         help='num of instance')
     parser.add_argument('--label_regularization_weight', type=float,
@@ -130,6 +130,9 @@ if __name__ == '__main__':
                         help="adjust the number of the similarity function") 
     parser.add_argument('--redundant_instance', type=int, default=0,
                         help='redundant instance output for local contrastive learning')
+    parser.add_argument('--sum_after_mlp', action='store_true',
+                        help='use point to generate mask')
+    
     
     
     
@@ -215,8 +218,9 @@ if __name__ == '__main__':
                 v.requires_grad = False
 
     if opt.with_sam:
+        
         sam_predictor = SamPredictor(
-            build_sam(checkpoint=opt.sam_ckpt).eval().to(device))
+            sam_model_registry_baseline["vit_h"](checkpoint=opt.sam_ckpt).eval().to(device))
     else:
         sam_predictor = None
 

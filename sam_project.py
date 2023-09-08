@@ -6,9 +6,10 @@ import cv2
 import imageio
 import tqdm
 import matplotlib.pyplot as plt
-from segment_anything import sam_model_registry, SamPredictor
+from segment_anything import sam_model_registry, SamPredictor, sam_model_registry_baseline
 import torch.nn.functional as F
 import argparse
+import json
 
 def show_points(coords, labels, ax, marker_size=375):
     pos_points = coords[labels==1]
@@ -52,7 +53,7 @@ def downsample_sam_feature(feature):
     return downsampled_feature
 
 
-def main(args):
+def main(args, pts_3D, input_label):
     sam_checkpoint = args.sam_checkpoint
     device = args.device
     model_type = args.model_type
@@ -66,7 +67,7 @@ def main(args):
 
     
     
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    sam = sam_model_registry_baseline[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
     predictor = SamPredictor(sam)
 
@@ -89,9 +90,8 @@ def main(args):
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=device)
     predictor = SamPredictor(sam)
-    pts_3D = None
 
-    rgb_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[0]}_rgb.png')
+    rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[0]}_rgb.png')
     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     predictor.set_image(image)
@@ -108,24 +108,17 @@ def main(args):
     #                         [-0.1149, -0.5198, -0.3918],
     #                         [-0.0710, -0.3939, -0.6091]])
     
-    pts_3D = torch.tensor([[-0.0956, -0.4185, -0.3230],
-                            [-0.0135, -0.3071, -0.1701],
-                            [ 0.0014, -0.2761, -0.3728],
-                            [-0.1080, -0.2990, -0.3226],
-                            [-0.1104, -0.5073, -0.3695],
-                            [ 0.0226, -0.3977, -0.2522],
-                            [-0.0048, -0.5092, -0.3536],
-                            [ 0.0386, -0.4081, -0.4083],
-                            [ 0.0169, -0.4760, -0.4811],
-                            [-0.0047, -0.1596, -0.4147]])
-
-    input_label = np.ones(pts_3D.shape[0])
-    input_label[-1] = 0 
+    
+    
+    
+    
+    valid_count = {}
+    
     for i in tqdm.tqdm(range(len(frame_names))):
 
-        rgb_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[i]}_rgb.png')
-        depth_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[i]}_depth.npy')
-        feature_name = os.path.join(frame_root, f'ngp_ep0016_{frame_names[i]}_sam.npy')
+        rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_rgb.png')
+        depth_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_depth.npy')
+        feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_sam.npy')
         
         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -156,6 +149,7 @@ def main(args):
             plt.axis('on')
             plt.savefig(output_file)
             plt.close()
+            valid_count[frame_names[i]] = 0
             continue
         pts_2D = pts_2D[valid]
         pts_depth = pts_depth[valid]
@@ -181,6 +175,7 @@ def main(args):
             plt.axis('on')
             plt.savefig(output_file)
             plt.close()
+            valid_count[frame_names[i]] = 0
             continue
         
         pts_2D = pts_2D[valid]
@@ -202,7 +197,10 @@ def main(args):
             multimask_output=True,
         )
 
-
+        if valid.sum() >= args.valid_threohould:
+            valid_count[frame_names[i]] = 1
+        else:
+            valid_count[frame_names[i]] = 0
         
         max_score = 0
         index = 0
@@ -222,268 +220,145 @@ def main(args):
         plt.axis('on')
         plt.savefig(output_file)
         plt.close()
-
-
-
-
-
-def get_3d_pts():
-
-    sam_checkpoint = "/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth"
-    device = "cuda:3"
-    model_type = "vit_h"
-    threshold = 0.05
-    # frame_root = '/disk1/yliugu/torch-ngp/workspace/3dfront_0089_t0_results/results/frames'
-    pose_file = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/pose_dir.json'
-    frame_root = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/validation'
-    camera_poses = os.path.join(frame_root, 'camera.npz')
-
-    output_root = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/masks'
-
-    input_point = np.array([[400, 500]])
-    input_label = np.array([1])
-    
-    
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-    predictor = SamPredictor(sam)
-
-
-    os.makedirs(output_root, exist_ok=True)
-    with open(pose_file) as f:
-        poses = json.load(f)
-    
-    frame_names = []
-    for k in poses.keys():
-        frame_names.append(k)
-    
-
-    H = W = 512
-    fovy = 60
-    focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
-    intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
-
-
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-    predictor = SamPredictor(sam)
-    pts_3D = None
-
-    rgb_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[0]}_rgb.png')
-    image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    predictor.set_image(image)
-    
-    
-
-
-
-    # print(extrinsics.shape, intrinsics.shape, images.shape, depths.shape, features.shape)
-    for i in tqdm.tqdm(range(len(frame_names))):
-        i=100
-        frame_names[i] = 'frame_00019'
-        
-        rgb_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_rgb.png')
-        depth_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_depth.npy')
-        feature_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_sam.npy')
-        p,n = poses[frame_names[i]], intrinsics
-        p = np.array(p).astype(np.float32)
-        p[:,1] = -p[:, 1]
-        p[:,2] = -p[:, 2]
-      
-        image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
-        r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        d = np.load(depth_name)[..., None]
-        f = np.load(feature_name)[0]
-
-
-        pts_3D = project_to_3d(input_point, p, n, d)
-        pts_2D, pts_depth = project_to_2d(pts_3D, p, n)
-        
-        # valid = pts_2D[..., 1] < r.shape[0] and pts_2D[..., 0] < r.shape[1] and \
-        #     pts_2D[..., 1] >= 0 and pts_2D[..., 0] >=0
-        valid =  np.logical_and.reduce((pts_2D[..., 1] < r.shape[0], pts_2D[..., 0] < r.shape[1],
-            pts_2D[..., 1] >= 0, pts_2D[..., 0] >=0))
-
-        if valid.sum() < 1:
-            print(f"{i} fails")
-            mask = np.zeros(d.shape)
-            np.save(output_file, mask)
-            continue
-        pts_2D = pts_2D[valid]
-        pts_depth = pts_depth[valid]
-        pts_label = input_label[valid]
-
-
-        im_depth = torch.from_numpy(d[pts_2D[...,1], pts_2D[..., 0]])
-
-        if im_depth.shape[0] >= 2:
-            im_depth = im_depth.transpose(1,0)
-            im_depth = im_depth[0]
-        # print((torch.abs(im_depth- pts_depth)  ))
-        valid = np.logical_and.reduce((pts_depth > 0., torch.abs(im_depth- pts_depth) < threshold))
-        
-        if valid.sum() < 1:
-            print(f"{i} fails")
-            mask = np.zeros(d.shape)
-            np.save(output_file, mask)
-            continue
-        
-        pts_2D = pts_2D[valid]
-        pts_label = pts_label[valid]
         
         
-        f = downsample_sam_feature(f)
-        predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
         
-        masks, scores, logits = predictor.predict(
-            point_coords=pts_2D.numpy(),
-            point_labels=pts_label,
-            multimask_output=True,
-        )
+    valid_file = os.path.join(output_root, 'valid.json')
+    with open(valid_file, 'w') as f:
+        f.write(json.dumps(valid_count, indent=4))
 
-        for j, (mask, score) in enumerate(zip(masks, scores)):
-            output_file = os.path.join(output_root, f'test_{frame_names[i]}_masks_{j}.png')
-            plt.figure(figsize=(10,10))
-            plt.imshow(r)
-            show_mask(mask, plt.gca())
-            show_points(pts_2D, pts_label, plt.gca())
-            plt.title(f"Mask {i+1}, Score: {score:.3f}", fontsize=18)
-            plt.axis('on')
-            plt.savefig(output_file)
-            plt.close()
-        break
 
 
 
 # def get_3d_pts():
-#     # intrinsics = np.array([400., 400., 320., 240.])
-#     sam_checkpoint = "/ssddata/yliugu/lerf/dependencies/sam-hq/pretrained_checkpoint/sam_vit_l_0b3195.pth"
-#     device = "cuda:0"
-#     model_type = "vit_l"
+
+#     sam_checkpoint = "/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth"
+#     device = "cuda:3"
+#     model_type = "vit_h"
 #     threshold = 0.05
 #     # frame_root = '/disk1/yliugu/torch-ngp/workspace/3dfront_0089_t0_results/results/frames'
-#     pose_file = '/ssddata/yliugu/data/Datasets/teatime/transforms.json'
-#     frame_root = 'render_feature'
+#     pose_file = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/pose_dir.json'
+#     frame_root = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/validation'
 #     camera_poses = os.path.join(frame_root, 'camera.npz')
 
-#     output_root = 'masks'
+#     output_root = '/ssddata/yliugu/Segment-Anything-NeRF/trial2_teatime/masks'
 
-#     input_point = np.array([[800, 660]])
+#     input_point = np.array([[400, 500]])
 #     input_label = np.array([1])
     
     
-#     sam = sam_model_registry_baseline[model_type](checkpoint=sam_checkpoint)
+#     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
 #     sam.to(device=device)
 #     predictor = SamPredictor(sam)
 
 
 #     os.makedirs(output_root, exist_ok=True)
 #     with open(pose_file) as f:
-#         poses = json.load(f)['frames']
+#         poses = json.load(f)
     
-#     with np.load(camera_poses) as p:
+#     frame_names = []
+#     for k in poses.keys():
+#         frame_names.append(k)
+    
 
-        
-#         intrinsics = np.concatenate([p['fx'], p['fy'], p['cx'], p['cy']], -1).astype(np.float32)
-#         print(intrinsics.shape)
-#         # c2w = np.array(p['transform_matrix']).astype(np.float32)
-        
-#         extrinsics = p['camera_to_worlds']
-#         # print(extrinsics[0])
-#         extrinsics[:, :,1] = -extrinsics[:, :, 1]
-#         # print(extrinsics[0])
-#         extrinsics[:, :,2] = -extrinsics[:, :, 2]
-        
-#         row = np.array([[[0,0,0,1]]]).repeat(extrinsics.shape[0], 0)
-#         extrinsics = np.concatenate([extrinsics, row], 1).astype(np.float32)
-       
-        
-#     # exit()
-    
-#     images = []
-#     depths = []
-#     features = []
-    
-#     idx = 175
-#     extrinsics = extrinsics[idx:idx+1]
-#     intrinsics = intrinsics[idx:idx+1]
-#     # for i in tqdm.tqdm(range(len(extrinsics))):
-#     for i in tqdm.tqdm(range(idx,idx+1)):
-    
-#         rgb_name = os.path.join(frame_root, f'{i:04}_rgb.png')
-#         depth_name = os.path.join(frame_root, f'{i:04}_depth.npy')
-#         feature_name = os.path.join(frame_root, f'{i:04}_feature.npy')
-#         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
-#         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-#         images.append(image)
-        
-#         depths.append(np.load(depth_name))
-#         # with np.load(depth_name) as data:
-#         #     size = data['size']
-#         #     depth = data['depth']
-#         #     depth = depth.reshape(size.tolist()).astype(np.float32)
-#         #     depths.append(depth)
-        
-#         features.append(np.load(feature_name))
-#         # with np.load(feature_name) as data:
-#         #     res = data['res']
-#         #     feature = data['embedding']
-#         #     feature = feature.reshape(res.tolist()).astype(np.float32)
-#         #     features.append(feature)
-    
+#     H = W = 512
+#     fovy = 60
+#     focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
+#     intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
+
+
 #     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
 #     sam.to(device=device)
 #     predictor = SamPredictor(sam)
 #     pts_3D = None
-#     predictor.set_image(images[0])
-    
-#     # pts_3D = project_to_3d(input_point, p, n, d)
-    
-#     pts_3D = torch.tensor([[-0.1268, -0.3349, -0.3373]])
-#     for i, (p,n,r,d,f) in tqdm.tqdm(enumerate(zip(extrinsics, intrinsics, images, depths, features))):
-#         if i == 0:
-#             pts_3D = project_to_3d(input_point, p, n, d)
-            
 
+#     rgb_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[0]}_rgb.png')
+#     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
+#     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+#     predictor.set_image(image)
+    
+    
+
+
+
+#     # print(extrinsics.shape, intrinsics.shape, images.shape, depths.shape, features.shape)
+#     for i in tqdm.tqdm(range(len(frame_names))):
+#         i=100
+#         frame_names[i] = 'frame_00019'
+        
+#         rgb_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_rgb.png')
+#         depth_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_depth.npy')
+#         feature_name = os.path.join(frame_root, f'ngp_ep0017_{frame_names[i]}_sam.npy')
+#         p,n = poses[frame_names[i]], intrinsics
+#         p = np.array(p).astype(np.float32)
+#         p[:,1] = -p[:, 1]
+#         p[:,2] = -p[:, 2]
+      
+#         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
+#         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+#         d = np.load(depth_name)[..., None]
+#         f = np.load(feature_name)[0]
+
+
+#         pts_3D = project_to_3d(input_point, p, n, d)
 #         pts_2D, pts_depth = project_to_2d(pts_3D, p, n)
         
-#         valid = pts_2D[..., 1] < r.shape[0] and pts_2D[..., 0] < r.shape[1] and \
-#             pts_2D[..., 1] >= 0 and pts_2D[..., 0] >=0
-            
+#         # valid = pts_2D[..., 1] < r.shape[0] and pts_2D[..., 0] < r.shape[1] and \
+#         #     pts_2D[..., 1] >= 0 and pts_2D[..., 0] >=0
+#         valid =  np.logical_and.reduce((pts_2D[..., 1] < r.shape[0], pts_2D[..., 0] < r.shape[1],
+#             pts_2D[..., 1] >= 0, pts_2D[..., 0] >=0))
+
 #         if valid.sum() < 1:
+#             print(f"{i} fails")
+#             mask = np.zeros(d.shape)
+#             np.save(output_file, mask)
 #             continue
 #         pts_2D = pts_2D[valid]
+#         pts_depth = pts_depth[valid]
+#         pts_label = input_label[valid]
+
+
 #         im_depth = torch.from_numpy(d[pts_2D[...,1], pts_2D[..., 0]])
 
-#         valid = (pts_depth > 0.) and (torch.abs(im_depth- pts_depth) < threshold )
+#         if im_depth.shape[0] >= 2:
+#             im_depth = im_depth.transpose(1,0)
+#             im_depth = im_depth[0]
+#         # print((torch.abs(im_depth- pts_depth)  ))
+#         valid = np.logical_and.reduce((pts_depth > 0., torch.abs(im_depth- pts_depth) < threshold))
         
 #         if valid.sum() < 1:
+#             print(f"{i} fails")
+#             mask = np.zeros(d.shape)
+#             np.save(output_file, mask)
 #             continue
+        
 #         pts_2D = pts_2D[valid]
+#         pts_label = pts_label[valid]
         
         
-#         f = downsample_sam_feature(f.transpose(2,0,1))
+#         f = downsample_sam_feature(f)
 #         predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
         
 #         masks, scores, logits = predictor.predict(
 #             point_coords=pts_2D.numpy(),
-#             point_labels=input_label,
+#             point_labels=pts_label,
 #             multimask_output=True,
 #         )
 
-        
 #         for j, (mask, score) in enumerate(zip(masks, scores)):
-#             output_file = os.path.join(output_root, f'test_{idx}.png')
+#             output_file = os.path.join(output_root, f'test_{frame_names[i]}_masks_{j}.png')
 #             plt.figure(figsize=(10,10))
 #             plt.imshow(r)
 #             show_mask(mask, plt.gca())
-#             show_points(pts_2D, input_label, plt.gca())
+#             show_points(pts_2D, pts_label, plt.gca())
 #             plt.title(f"Mask {i+1}, Score: {score:.3f}", fontsize=18)
-#             plt.axis('off')
+#             plt.axis('on')
 #             plt.savefig(output_file)
 #             plt.close()
-#     print(pts_3D)
+#         break
+
+
+
 
 
 
@@ -555,12 +430,18 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
-    parser.add_argument('--device', type=str, default='cuda:1')
+    parser.add_argument('--device', type=str, default='cuda:3')
     parser.add_argument('--model_type', type=str, default='vit_h')
     parser.add_argument('--threshold', type=float, default=0.1)
-    parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/pose_dir.json')
-    parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/validation')
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/sheep_masks')
+    parser.add_argument('--epoch', type=str, default='0029')
+    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam')
+    
+    # parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/pose_dir.json')
+    # parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam/validation')
+    
+    
+    parser.add_argument('--valid_threohould', type=int, default=4)
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/garden/table')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     
     
@@ -574,7 +455,61 @@ if __name__ == '__main__':
     # parser.add_argument('--threshold', type=float, default=0.1)
 
     args = parser.parse_args()
+    
+    
+    args.pose_file = os.path.join(args.files_root, 'pose_dir.json')
+    args.frame_root = os.path.join(args.files_root, 'validation')
     args.camera_poses = os.path.join(args.frame_root, 'camera.npz')
-    main(args)
+    
+    # # test case 0
+    # pts_3D = torch.tensor([[-0.0956, -0.4185, -0.3230],
+    #                         [-0.0135, -0.3071, -0.1701],
+    #                         [ 0.0014, -0.2761, -0.3728],
+    #                         [-0.1080, -0.2990, -0.3226],
+    #                         [-0.1104, -0.5073, -0.3695],
+    #                         [ 0.0226, -0.3977, -0.2522],
+    #                         [-0.0048, -0.5092, -0.3536],
+    #                         [ 0.0386, -0.4081, -0.4083],
+    #                         [ 0.0169, -0.4760, -0.4811],
+    #                         [-0.0047, -0.1596, -0.4147]])
+
+    # input_label = np.ones(pts_3D.shape[0])
+    # input_label[-1] = 0 
+    
+    
+    # # test case 2: sheep
+    # pts_3D = torch.tensor([[ 0.0349, -0.2395, -0.1510],
+    #                         [ 0.0265, -0.2429, -0.3851],
+    #                         [-0.1043, -0.2565, -0.3524],
+    #                         [ 0.0607, -0.3543, -0.2073],
+    #                         [-0.0913, -0.4343, -0.3219],
+    #                         [-0.1727, -0.4455, -0.5075],
+    #                         [-0.0554, -0.4103, -0.5615],
+    #                         [ 0.0615, -0.4076, -0.3355],
+    #                         [-0.0432, -0.3506, -0.4291]])
+    # input_label = np.ones(pts_3D.shape[0])
+    
+    
+    # test case 4: garden
+    pts_3D = torch.tensor([[ 0.0922, -0.1093, -0.4020],
+        [ 0.0973,  0.2045, -0.3965],
+        [ 0.1441,  0.1804, -0.5945],
+        [ 0.0557, -0.1154, -0.6349],
+        [-0.2492, -0.0210, -0.6243],
+        [-0.1622,  0.2775, -0.6516]])
+    input_label = np.ones(pts_3D.shape[0])
+    
+    
+    # test case 4: garden
+    pts_3D = torch.tensor([[ 0.1772,  0.0180, -0.4012],
+                        [-0.1294,  0.2618, -0.3944],
+                        [-0.1300,  0.0416, -0.4265],
+                        [-0.1215,  0.0604, -0.4093],
+                        [-0.0517,  0.0580, -0.6673]])
+    input_label = np.ones(pts_3D.shape[0])
+    
+
+    
+    main(args, pts_3D, input_label)
     # get_3d_pts()
     # create_video()
