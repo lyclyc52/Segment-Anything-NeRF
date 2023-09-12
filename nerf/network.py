@@ -60,14 +60,18 @@ class SkipConnMLP(nn.Module):
 
         self.net = nn.ModuleList(net)
     
-    def forward(self, x):
+    def forward(self, x, save_intermedian_results=False):
         x_in = x
+        if save_intermedian_results:
+            self.intermedian_reuslts = []
         for l in range(self.num_layers):
             if l in self.skip_layers:
                 x = torch.cat([x, x_in], dim=-1)
             x = self.net[l](x)
             if l != self.num_layers - 1:
                 x = F.leaky_relu(x, inplace=True)
+            if save_intermedian_results:
+                self.intermedian_reuslts.append(x.detach())
         return x
 
 # From https://github.com/facebookresearch/detectron2/blob/main/detectron2/layers/batch_norm.py # noqa
@@ -105,11 +109,17 @@ class NeRFNetwork(NeRFRenderer):
         # feature MLP
         if self.opt.with_sam:
             self.s_grid, self.s_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, log2_hashmap_size=19, desired_resolution=512)
-            self.samvit_mlp = nn.Sequential(
-                SkipConnMLP(self.s_dim + self.geom_feat_dim + self.view_in_dim + 4, 256, 256, 5, skip_layers=[2], bias=True),
-                nn.LayerNorm(256),
-            )
-        elif self.opt.with_mask:
+            self.samvit_mlp_input_dim = self.s_dim + self.geom_feat_dim + 3
+            if not self.opt.sum_after_mlp:
+                self.samvit_mlp_input_dim = self.samvit_mlp_input_dim + 1
+            if self.opt.sam_use_view_direction:
+                self.samvit_mlp_input_dim = self.samvit_mlp_input_dim + self.view_in_dim 
+                
+            self.samvit_mlp = SkipConnMLP(self.samvit_mlp_input_dim, 256, 256, 5, skip_layers=[2], bias=True)
+            self.norm_layer = nn.LayerNorm(256)
+
+        
+        if self.opt.with_mask:
             if self.opt.mask_mlp_type == 'default':
                 self.m_grid, self.m_dim = get_encoder("hashgrid", input_dim=3, num_levels=16, level_dim=8, base_resolution=16, 
                                                       log2_hashmap_size=19, desired_resolution=512)
@@ -124,13 +134,45 @@ class NeRFNetwork(NeRFRenderer):
                 self.mask_mlp = MLP(self.geom_feat_dim + self.view_in_dim + 4, self.opt.redundant_instance + self.opt.n_inst, 64, 3, bias=False)
             elif self.opt.mask_mlp_type == 'adaptive':
                 self.mask_mlp = []
-                self.mask_mlp.append(nn.Linear(64, 32, bias=False))
-                self.mask_mlp.append(nn.Linear(64+32, 32, bias=False))
-                self.mask_mlp.append(nn.Linear(16+32, 32, bias=False))
-                
-                self.mask_mlp.append(nn.Linear(32+32, 32, bias=False))
-                self.mask_mlp.append(nn.Linear(32+32, 32, bias=False))
-                
+                self.mask_mlp_dim = 32
+                if self.opt.adaptive_mlp_type == 'rgb':
+                    self.mask_mlp.append(nn.Linear(self.grid_in_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(16+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    
+                    self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    
+                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.opt.n_inst, bias=False))
+                elif self.opt.adaptive_mlp_type == 'density':
+                    self.mask_mlp.append(nn.Linear(self.grid_in_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(16+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    
+                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.opt.n_inst, bias=False))
+                    
+                    # self.mask_mlp.append(nn.Linear(64, self.mask_mlp_dim, bias=False))
+                    # self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    # self.mask_mlp.append(nn.Linear(16+self.mask_mlp_dim, self.opt.n_inst, bias=False))
+                    
+             
+                    
+                    
+                    self.mask_mlp = nn.ModuleList(self.mask_mlp)
+                    
+                elif self.opt.adaptive_mlp_type == 'sam':
+                    self.mask_mlp.append(nn.Linear(64, 32, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+32, 32, bias=False))
+                    self.mask_mlp.append(nn.Linear(16+32, 64, bias=False))
+                    
+                    self.mask_mlp.append(nn.Linear(256+64, 256, bias=False))
+                    self.mask_mlp.append(nn.Linear(256+256, 256, bias=False))
+                    self.mask_mlp.append(nn.Linear(256+256, 256, bias=False))
+                    self.mask_mlp.append(nn.Linear(256+256, self.opt.n_inst, bias=False))
                 
                 self.mask_mlp = nn.ModuleList(self.mask_mlp)
                     
@@ -153,19 +195,19 @@ class NeRFNetwork(NeRFRenderer):
 
     def common_forward(self, x, save_intermedian_results=False):
 
-        f = self.grid(x, bound=self.bound)
-        f = self.grid_mlp(f, save_intermedian_results)
+        grid_output = self.grid(x, bound=self.bound)
+        f = self.grid_mlp(grid_output, save_intermedian_results)
 
         sigma = trunc_exp(f[..., 0])
         feat = f[..., 1:]
     
-        return sigma, feat
+        return sigma, feat, grid_output
 
     def forward(self, x, d, save_intermedian_results=False, **kwargs):
         # x: [N, 3], in [-bound, bound]
         # d: [N, 3], nomalized in [-1, 1]
         
-        sigma, feat = self.common_forward(x, save_intermedian_results)
+        sigma, feat, grid_output = self.common_forward(x, save_intermedian_results)
 
         d = self.view_encoder(d)
         
@@ -175,6 +217,7 @@ class NeRFNetwork(NeRFRenderer):
             'sigma': sigma,
             'geo_feat': feat,
             'color': f_color,
+            'grid_output': grid_output
         }
 
     def density(self, x, proposal=-1):
@@ -184,7 +227,7 @@ class NeRFNetwork(NeRFRenderer):
             sigma = trunc_exp(self.prop_mlp[proposal](self.prop_encoders[proposal](x, bound=self.bound)).squeeze(-1))
         # final NeRF
         else:
-            sigma, _ = self.common_forward(x)
+            sigma, _, _ = self.common_forward(x)
 
         return {
             'sigma': sigma,
@@ -223,6 +266,7 @@ class NeRFNetwork(NeRFRenderer):
             params.extend([
                 {'params': self.s_grid.parameters(), 'lr': lr},
                 {'params': self.samvit_mlp.parameters(), 'lr': lr},
+                {'params': self.norm_layer.parameters(), 'lr': lr},
             ])
 
         if self.opt.with_mask:

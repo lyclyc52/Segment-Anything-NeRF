@@ -26,6 +26,8 @@ if __name__ == '__main__':
                         default='./pretrained/sam_vit_h_4b8939.pth', help='ckpt to sam-h')
     parser.add_argument('--online_resolution', type=int, default=512,
                         help="NeRF rendering resolution at online distillation")
+    parser.add_argument('--sam_use_view_direction', action='store_true',
+                        help='use view direction to sam feature')
 
     parser.add_argument('--cache_size', type=int, default=256,
                         help="online training cache size (on GPU!), <=0 to disable")
@@ -124,22 +126,20 @@ if __name__ == '__main__':
                         help="rgb similarity loss weight")
     parser.add_argument('--rgb_similarity_threshold', type=float, default=0.3,
                         help="rgb similarity loss weight") 
-    parser.add_argument('--rgb_similarity_epsilon', type=float, default=0.000001,
+    parser.add_argument('--epsilon', type=float, default=0.000001,
                         help="avoid log zero in BCE loss") 
     parser.add_argument('--rgb_similarity_exp_weight', type=float, default=10,
                         help="adjust the number of the similarity function") 
+    parser.add_argument('--rgb_similarity_num_sample', type=int, default=1,
+                        help='number of sampling points of the similarity function')
     parser.add_argument('--redundant_instance', type=int, default=0,
                         help='redundant instance output for local contrastive learning')
     parser.add_argument('--sum_after_mlp', action='store_true',
                         help='use point to generate mask')
-    
-    
-    
-    
-    
-    
-    # parser.add_argument('--local_patch_size', type=int, default=)
-    
+    parser.add_argument('--adaptive_mlp_type', type=str,
+                        default='density', choices=['density', 'rgb', 'sam'])
+    parser.add_argument('--use_multi_res', action='store_true',
+                        help='use multi-resolution to generate mask')
     
     parser.add_argument('--use_wandb', action='store_true')
 

@@ -634,11 +634,19 @@ class Trainer(object):
 
 
     def rgb_similarity_loss(self, rgb, inst_masks):
-
-        sample_index = torch.randint(0, rgb.size(0), size=[1]).to(inst_masks.device)
-        color_similarity_map = torch.norm(rgb-rgb[sample_index], dim=-1)
-        # color_similarity_map = color_similarity_map / color_similarity_map.max()
         
+        # random sample some points
+        perm = torch.randperm(rgb.size(0))
+        sample_index = perm[:self.opt.rgb_similarity_num_sample]
+        
+        
+        rgb_sample = rgb[sample_index][:, None, ...]
+        sample_mask = inst_masks[sample_index][:, None, ...]
+        
+        rgb = rgb[None, ...]
+        inst_masks = inst_masks[None, ...]
+        
+        color_similarity_map = torch.norm(rgb-rgb_sample, dim=-1)
         similarity_map = color_similarity_map < self.opt.rgb_similarity_threshold
         
         
@@ -648,21 +656,18 @@ class Trainer(object):
         # cv2.imwrite(f'debug/{self.global_step}_similarity.png', (similarity_map_save[0] * 255).cpu().numpy().astype(np.uint8))
         
         
-        sample_mask = inst_masks[sample_index]
-        # sample_mask = sample_mask / torch.norm(sample_mask, dim=-1, keepdim=True)
-        
 
         
         if self.opt.redundant_instance > 0:
             pred_masks_similarity = F.cosine_similarity(inst_masks, sample_mask, dim=-1)
-            pred_masks_similarity = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.rgb_similarity_epsilon) 
+            pred_masks_similarity = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
             labels = 1. - similarity_map.to(torch.int)
-
             rgb_loss = F.binary_cross_entropy(pred_masks_similarity, labels, reduction='mean')
         else:
-            rgb_similar_mask = inst_masks[similarity_map]
-            pred_masks_similarity = F.cosine_similarity(rgb_similar_mask, sample_mask, dim=-1)
-            pred_masks_similarity = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.rgb_similarity_epsilon) 
+            # rgb_similar_mask = inst_masks[similarity_map]
+            pred_masks_similarity = F.cosine_similarity(inst_masks, sample_mask, dim=-1)
+            pred_masks_similarity = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
+            pred_masks_similarity = similarity_map * pred_masks_similarity
 
             rgb_loss = pred_masks_similarity.mean()
         # label = torch.zeros(pred_masks_similarity.shape[0], requires_grad=False).to(pred_masks_similarity.device)
@@ -778,7 +783,8 @@ class Trainer(object):
                 bg_color = 1
 
                 outputs = self.model.render(rays_o, rays_d, staged=False, index=index, bg_color=bg_color,
-                                            perturb=False, cam_near_far=cam_near_far, update_proposal=False, return_feats=0, return_mask=1)
+                                            perturb=False, cam_near_far=cam_near_far, update_proposal=False, 
+                                            return_rgb=0, return_feats=0, return_mask=1)
 
                 # [B, N, num_instances]
                 inst_masks = outputs['instance_mask_logits']
@@ -794,7 +800,7 @@ class Trainer(object):
                 pred_masks = torch.stack([inst_masks[..., :-1].sum(-1), inst_masks[..., -1]], -1)
                 
                 pred_masks_flattened = pred_masks.view(-1, 2)
-                pred_masks_flattened = torch.clamp(pred_masks_flattened, min=self.opt.rgb_similarity_epsilon, max=1-self.opt.rgb_similarity_epsilon)
+                pred_masks_flattened = torch.clamp(pred_masks_flattened, min=self.opt.epsilon, max=1-self.opt.epsilon)
  
                 if labeled.sum() > 0:
                     # [B*N], loss fn with reduction='none'
@@ -824,7 +830,7 @@ class Trainer(object):
 
                 return pred_masks, gt_mask, loss
 
-            if self.opt.with_sam:
+            elif self.opt.with_sam:
                 with torch.no_grad():
                     if use_cache:
                         gt_samvit = data['gt_samvit']
@@ -920,7 +926,7 @@ class Trainer(object):
                 pred_mask = torch.stack([inst_masks[..., :-1].sum(-1), inst_masks[..., -1]], -1)
                 pred_mask_flattened = pred_mask.view(-1, 2)
  
-                pred_mask_flattened = torch.clamp(pred_mask_flattened, min=self.opt.rgb_similarity_epsilon, max=1-self.opt.rgb_similarity_epsilon)
+                pred_mask_flattened = torch.clamp(pred_mask_flattened, min=self.opt.epsilon, max=1-self.opt.epsilon)
  
                 if labeled.sum() > 0:
                     loss = -torch.log(torch.gather(pred_mask_flattened[labeled], -1, gt_mask_flattened[labeled][..., None]))
@@ -1213,6 +1219,8 @@ class Trainer(object):
         for epoch in range(self.epoch + 1, max_epochs + 1):
             self.epoch = epoch
 
+            
+            train_loader.epoch = epoch
             self.train_one_epoch(train_loader)
 
             if (self.epoch % self.save_interval == 0 or self.epoch == max_epochs) and self.workspace is not None and self.local_rank == 0:
@@ -1438,15 +1446,16 @@ class Trainer(object):
         # ref: https://pytorch.org/docs/stable/data.html
         if self.world_size > 1:
             loader.sampler.set_epoch(self.epoch)
-
+        loader._data.epoch = self.epoch
+        
         if self.local_rank == 0:
             pbar = tqdm.tqdm(total=len(loader) * loader.batch_size,
                              bar_format='{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
         self.local_step = 0
 
-        for data in loader:
 
+        for data in loader:
             self.local_step += 1
             self.global_step += 1
 

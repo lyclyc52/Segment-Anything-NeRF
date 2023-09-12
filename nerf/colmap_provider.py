@@ -390,7 +390,7 @@ class ColmapDataset:
             # else: trainval use all.
             
             # read images
-            if not self.opt.with_sam:
+            if not self.opt.with_sam and not self.opt.with_mask:
                 self.images = []
                 for f in tqdm.tqdm(img_paths, desc=f'Loading {self.type} image'):
                     image = cv2.imread(f, cv2.IMREAD_UNCHANGED) # [H, W, 3] o [H, W, 4]
@@ -409,14 +409,12 @@ class ColmapDataset:
             def validate_file(file_name):
                 file_id = int(file_name[-15:-10])
                 # return_value = file_id <= 30 or (file_id >=53 and file_id <=54 ) or (file_id >= 122 and file_id <=135) or \
-                #     (file_id >= 171 and file_id <= 177) 
-                
-                # return_value = file_id <= 30 and file_id >=2
+                #                 (file_id >= 171 and file_id <= 177)
+                                 
                 # return return_value
                 
                 return True
-            
-            
+
             if self.opt.with_mask:
                 self.masks = []
                 self.valid_mask_index = []
@@ -433,7 +431,8 @@ class ColmapDataset:
                     
                     if mask.sum()>=10 and validate_file(f) and valid_dict[img_names[idx][:-4]]:
                         self.valid_mask_index.append(idx)
-                        
+                    # if mask.sum()>=10 and validate_file(f):
+                    #     self.valid_mask_index.append(idx)
                 
                     self.masks.append(mask.to(int))
                 self.masks = torch.stack(self.masks, axis=0)
@@ -486,14 +485,14 @@ class ColmapDataset:
                 self.cam_near_far = self.cam_near_far.to(self.device)
 
     def collate(self, index):
-    
+        
         num_rays = -1 # defaul, eval, test, train SAM use all rays
         if self.opt.with_mask:
             if index not in self.valid_mask_index:
                 index= random.sample(self.valid_mask_index, 1)
                 
                 
-        if self.training and not self.opt.with_sam :
+        if self.training and not self.opt.with_sam:
             num_rays = self.opt.num_rays
             if self.opt.random_image_batch and not self.opt.with_mask:
                 index = torch.randint(0, len(self.poses), size=(num_rays,), device=self.device if self.preload else 'cpu')
@@ -502,7 +501,7 @@ class ColmapDataset:
         poses = self.poses[index] # [1/N, 4, 4]
         intrinsics = self.intrinsics[index] # [1/N, 4]
 
-        if self.opt.with_sam:
+        if self.opt.with_sam and not self.opt.with_mask:
             # augment poses
             if self.training:    
                 H = W = self.opt.online_resolution
@@ -591,7 +590,7 @@ class ColmapDataset:
         results['rays_d'] = rays['rays_d'].to(self.device)
         results['index'] = index.to(self.device) if torch.is_tensor(index) else index
 
-        if self.opt.with_sam:
+        if self.opt.with_sam and not self.opt.with_mask:
             scale = 16 * self.opt.online_resolution // 1024 
             rays_lr = get_rays(poses, intrinsics / scale, H // scale, W // scale, num_rays, device=self.device if self.preload else 'cpu')
             results['rays_o_lr'] = rays_lr['rays_o'].to(self.device)

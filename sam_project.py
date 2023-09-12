@@ -425,23 +425,21 @@ def create_video():
     
 
 if __name__ == '__main__':
-    
-    
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
     parser.add_argument('--device', type=str, default='cuda:3')
     parser.add_argument('--model_type', type=str, default='vit_h')
-    parser.add_argument('--threshold', type=float, default=0.1)
+    parser.add_argument('--threshold', type=float, default=0.05)
     parser.add_argument('--epoch', type=str, default='0029')
-    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam')
+    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam_sumafter')
     
     # parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/pose_dir.json')
     # parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam/validation')
     
     
-    parser.add_argument('--valid_threohould', type=int, default=4)
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/garden/table')
+    parser.add_argument('--valid_threohould', type=int, default=5)
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/Datasets/garden/table_sumafter')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     
     
@@ -477,7 +475,7 @@ if __name__ == '__main__':
     # input_label[-1] = 0 
     
     
-    # # test case 2: sheep
+    # test case 2: sheep
     # pts_3D = torch.tensor([[ 0.0349, -0.2395, -0.1510],
     #                         [ 0.0265, -0.2429, -0.3851],
     #                         [-0.1043, -0.2565, -0.3524],
@@ -490,23 +488,32 @@ if __name__ == '__main__':
     # input_label = np.ones(pts_3D.shape[0])
     
     
-    # test case 4: garden
-    pts_3D = torch.tensor([[ 0.0922, -0.1093, -0.4020],
-        [ 0.0973,  0.2045, -0.3965],
-        [ 0.1441,  0.1804, -0.5945],
-        [ 0.0557, -0.1154, -0.6349],
-        [-0.2492, -0.0210, -0.6243],
-        [-0.1622,  0.2775, -0.6516]])
-    input_label = np.ones(pts_3D.shape[0])
+    # # test case 4: garden
+    # pts_3D = torch.tensor([[ 0.0922, -0.1093, -0.4020],
+    #     [ 0.0973,  0.2045, -0.3965],
+    #     [ 0.1441,  0.1804, -0.5945],
+    #     [ 0.0557, -0.1154, -0.6349],
+    #     [-0.2492, -0.0210, -0.6243],
+    #     [-0.1622,  0.2775, -0.6516]])
+    # input_label = np.ones(pts_3D.shape[0])
     
     
-    # test case 4: garden
+    # # test case 4: garden
     pts_3D = torch.tensor([[ 0.1772,  0.0180, -0.4012],
                         [-0.1294,  0.2618, -0.3944],
                         [-0.1300,  0.0416, -0.4265],
                         [-0.1215,  0.0604, -0.4093],
-                        [-0.0517,  0.0580, -0.6673]])
+                        [-0.0517,  0.0580, -0.6673],
+                        [ 0.0532, -0.1099, -0.6656],
+                        [ 0.1468,  0.1817, -0.6530],
+                        # [-0.1656,  0.2856, -0.6465],
+                        # [-0.2695, -0.0262, -0.6177],
+                        # negative points
+                        [-0.0422,  0.0305, -0.3319],
+                        [-0.0534,  0.1006, -0.3437]])
     input_label = np.ones(pts_3D.shape[0])
+    
+    input_label[-2:] = 0
     
 
     
