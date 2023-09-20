@@ -14,8 +14,8 @@ python main.py /ssddata/yliugu/data/garden \
 --render_mask_type composition \
 --sum_after_mlp \
 --mask_mlp_type adaptive \
---ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_model/debug/checkpoints/ngp_ep0029.pth \
---adaptive_mlp_type rgb 
+--ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_model/debug_density/checkpoints/ngp_ep0005.pth \
+--adaptive_mlp_type density 
 
 
 

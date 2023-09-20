@@ -432,14 +432,14 @@ if __name__ == '__main__':
     parser.add_argument('--model_type', type=str, default='vit_h')
     parser.add_argument('--threshold', type=float, default=0.05)
     parser.add_argument('--epoch', type=str, default='0029')
-    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam_sumafter')
+    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam')
     
     # parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/pose_dir.json')
     # parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam/validation')
     
     
     parser.add_argument('--valid_threohould', type=int, default=5)
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/Datasets/garden/table_sumafter')
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/Datasets/garden/table_negative')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     
     

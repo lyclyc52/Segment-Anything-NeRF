@@ -132,6 +132,11 @@ if __name__ == '__main__':
                         help="adjust the number of the similarity function") 
     parser.add_argument('--rgb_similarity_num_sample', type=int, default=1,
                         help='number of sampling points of the similarity function')
+    parser.add_argument('--rgb_similarity_iter', type=int, default=-1,
+                        help='iteration that will start to use rgb similarity loss')
+    parser.add_argument('--rgb_similarity_use_pred_logistics', action='store_true',
+                        help='use predicted logistics as reference when encouraging instance similarity')
+    
     parser.add_argument('--redundant_instance', type=int, default=0,
                         help='redundant instance output for local contrastive learning')
     parser.add_argument('--sum_after_mlp', action='store_true',
@@ -141,6 +146,24 @@ if __name__ == '__main__':
     parser.add_argument('--use_multi_res', action='store_true',
                         help='use multi-resolution to generate mask')
     
+    parser.add_argument('--use_dynamic_incoherent', action='store_true',
+                        help='use render masks as incoherent region reference')
+    parser.add_argument('--multi_res_iter', type=int,
+                        default=100, help='use multi-resolution to generate mask')
+    parser.add_argument('--max_multi_res_level', type=int,
+                        default=1, help='use multi-resolution to generate mask')
+    
+    parser.add_argument('--mixed_sampling', action='store_true',
+                        help='include local sampling when choosing training points') 
+    parser.add_argument('--local_sample_patch_size', type=int, default=16,
+                        help='patch size of local sampling')
+    parser.add_argument('--num_local_sample', type=int, default=2,
+                        help='number of points of local sampling')
+    parser.add_argument('--error_map', action='store_true',
+                        help='use error map ')
+    parser.add_argument('--error_map_size', type=int, default=512,
+                        help='size of the error maps')
+      
     parser.add_argument('--use_wandb', action='store_true')
 
     # evaluation option
@@ -179,7 +202,7 @@ if __name__ == '__main__':
     opt.preload = True  # unset if CUDA OOM
     opt.contract = True
     opt.adaptive_num_rays = True
-    opt.random_image_batch = True
+    # opt.random_image_batch = True
 
     from nerf.colmap_provider import ColmapDataset
     from nerf.lerf_provider import LERFDataset
