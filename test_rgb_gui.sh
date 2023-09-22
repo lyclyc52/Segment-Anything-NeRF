@@ -1,6 +1,6 @@
 
 export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6 
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=3
 python main.py /ssddata/yliugu/data/garden \
 --workspace /ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden \
 --enable_cam_center \
@@ -9,5 +9,5 @@ python main.py /ssddata/yliugu/data/garden \
 --gui \
 --data_type mip \
 --contract \
---ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_rgb/checkpoints/ngp_ep0088.pth \
+--ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_counter_rgb/checkpoints/ngp_ep0067.pth \
 --sum_after_mlp

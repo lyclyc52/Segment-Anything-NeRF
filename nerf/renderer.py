@@ -194,7 +194,6 @@ class NeRFRenderer(nn.Module):
             results = {}
             while head < N:
                 tail = min(head + self.opt.max_ray_batch, N)
-
                 if cam_near_far is None:
                     results_ = self.run(
                         rays_o[head:tail], rays_d[head:tail], cam_near_far=None, **kwargs)
@@ -384,7 +383,7 @@ class NeRFRenderer(nn.Module):
                     f = torch.cat([f_sam, geo_feat_sum, image, depth.unsqueeze(-1)], dim=-1)
                 
                 samvit_mlp = self.samvit_mlp(f)
-                samvit_mlp = self.norm_layer(samvit_mlp)
+                # samvit_mlp = self.norm_layer(samvit_mlp)
                 if return_feats > 0:
                     samvit_mlp = samvit_mlp.view(H, W, -1)
             if return_feats > 0:
@@ -401,26 +400,26 @@ class NeRFRenderer(nn.Module):
                 if self.opt.adaptive_mlp_type == 'rgb':
                     
                     # architecture 0
-                    # m = self.mask_mlp[0](grid_output.detach())
-                    # m = self.mask_mlp[1](torch.cat([self.grid_mlp.intermedian_reuslts[0], m], dim=-1))
-                    # m = self.mask_mlp[2](torch.cat([self.grid_mlp.intermedian_reuslts[1], m], dim=-1))
-                    # m = self.mask_mlp[3](torch.cat([self.grid_mlp.intermedian_reuslts[2], m], dim=-1))
+                    m = self.mask_mlp[0](grid_output.detach())
+                    m = self.mask_mlp[1](torch.cat([self.grid_mlp.intermedian_reuslts[0], m], dim=-1))
+                    m = self.mask_mlp[2](torch.cat([self.grid_mlp.intermedian_reuslts[1], m], dim=-1))
+                    m = self.mask_mlp[3](torch.cat([self.grid_mlp.intermedian_reuslts[2], m], dim=-1))
         
-                    # m = self.mask_mlp[4](torch.cat([self.view_mlp.intermedian_reuslts[0], m], dim=-1))
-                    # m = self.mask_mlp[5](torch.cat([self.view_mlp.intermedian_reuslts[1], m], dim=-1))
+                    m = self.mask_mlp[4](torch.cat([self.view_mlp.intermedian_reuslts[0], m], dim=-1))
+                    m = self.mask_mlp[5](torch.cat([self.view_mlp.intermedian_reuslts[1], m], dim=-1))
                     
-                    # m = self.mask_mlp[6](m)
-                    # point_masks = self.mask_mlp[7](m)
+                    m = self.mask_mlp[6](m)
+                    point_masks = self.mask_mlp[7](m)
                     
                     
                     # architecture 1
-                    m = self.mask_mlp[0](self.grid_mlp.intermedian_reuslts[1])
+                    # m = self.mask_mlp[0](self.grid_mlp.intermedian_reuslts[1])
 
         
-                    m = self.mask_mlp[1](torch.cat([self.view_mlp.intermedian_reuslts[0], m], dim=-1))
-                    m = self.mask_mlp[2](torch.cat([self.view_mlp.intermedian_reuslts[1], m], dim=-1))
+                    # m = self.mask_mlp[1](torch.cat([self.view_mlp.intermedian_reuslts[0], m], dim=-1))
+                    # m = self.mask_mlp[2](torch.cat([self.view_mlp.intermedian_reuslts[1], m], dim=-1))
                     
-                    point_masks = self.mask_mlp[3](m)
+                    # point_masks = self.mask_mlp[3](m)
                     
                 elif self.opt.adaptive_mlp_type == 'density':
                     m = self.mask_mlp[0](grid_output.detach())

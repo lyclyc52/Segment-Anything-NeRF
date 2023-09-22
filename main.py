@@ -81,7 +81,7 @@ if __name__ == '__main__':
     parser.add_argument('--background', type=str, default='last_sample', choices=[
                         'white', 'random', 'last_sample'], help="training background mode")
 
-    parser.add_argument('--max_ray_batch', type=int, default=4096 * 4,
+    parser.add_argument('--max_ray_batch', type=int, default=4096 * 4 ,
                         help="batch size of rays at inference to avoid OOM")
     parser.add_argument('--density_thresh', type=float, default=10,
                         help="threshold for density grid to be occupied")
@@ -117,6 +117,7 @@ if __name__ == '__main__':
                         default=0., help="label regularization weight")
     parser.add_argument('--patch_size', type=int, default=1,
                         help='patch size in train sampling')
+    parser.add_argument('--pose_jittering', action='store_true')
     parser.add_argument('--mask_folder_name', type=str,
                         default='masks', help="mask folder name")
     
@@ -148,10 +149,18 @@ if __name__ == '__main__':
     
     parser.add_argument('--use_dynamic_incoherent', action='store_true',
                         help='use render masks as incoherent region reference')
-    parser.add_argument('--multi_res_iter', type=int,
+    parser.add_argument('--incoherent_update_iter', type=int,
+                        default=50, help='use multi-resolution to generate mask')
+    parser.add_argument('--incoherent_downsample_scale', type=int,
+                        default=1, help='use multi-resolution to generate mask')
+     
+ 
+    parser.add_argument('--use_mutli_res', action='store_true',
+                        help='use multi resolution in training')
+    parser.add_argument('--multi_res_update_iter', type=int,
                         default=100, help='use multi-resolution to generate mask')
     parser.add_argument('--max_multi_res_level', type=int,
-                        default=1, help='use multi-resolution to generate mask')
+                        default=2, help='use multi-resolution to generate mask')
     
     parser.add_argument('--mixed_sampling', action='store_true',
                         help='include local sampling when choosing training points') 
@@ -161,7 +170,7 @@ if __name__ == '__main__':
                         help='number of points of local sampling')
     parser.add_argument('--error_map', action='store_true',
                         help='use error map ')
-    parser.add_argument('--error_map_size', type=int, default=512,
+    parser.add_argument('--error_map_size', type=int, default=128,
                         help='size of the error maps')
       
     parser.add_argument('--use_wandb', action='store_true')

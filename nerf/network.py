@@ -115,9 +115,12 @@ class NeRFNetwork(NeRFRenderer):
             if self.opt.sam_use_view_direction:
                 self.samvit_mlp_input_dim = self.samvit_mlp_input_dim + self.view_in_dim 
                 
-            self.samvit_mlp = SkipConnMLP(self.samvit_mlp_input_dim, 256, 256, 5, skip_layers=[2], bias=True)
-            self.norm_layer = nn.LayerNorm(256)
-
+            # self.samvit_mlp = SkipConnMLP(self.samvit_mlp_input_dim, 256, 256, 5, skip_layers=[2], bias=True)
+            # self.norm_layer = nn.LayerNorm(256)
+            self.samvit_mlp = nn.Sequential(
+                SkipConnMLP(self.s_dim + self.geom_feat_dim + self.view_in_dim + 4, 256, 256, 5, skip_layers=[2], bias=True),
+                nn.LayerNorm(256),
+            )
         
         if self.opt.with_mask:
             if self.opt.mask_mlp_type == 'default':
@@ -134,28 +137,28 @@ class NeRFNetwork(NeRFRenderer):
                 self.mask_mlp = MLP(self.geom_feat_dim + self.view_in_dim + 4, self.opt.redundant_instance + self.opt.n_inst, 64, 3, bias=False)
             elif self.opt.mask_mlp_type == 'adaptive':
                 self.mask_mlp = []
-                self.mask_mlp_dim = 64
+                self.mask_mlp_dim = 96
                 if self.opt.adaptive_mlp_type == 'rgb':
                     # architecture 0
-                    # self.mask_mlp.append(nn.Linear(self.grid_in_dim, self.mask_mlp_dim, bias=False))
-                    # self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
-                    # self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
-                    # self.mask_mlp.append(nn.Linear(16+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(self.grid_in_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(16+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
                     
-                    # self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
-                    # self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
                     
-                    # self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
-                    # self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.opt.n_inst, bias=False))
+                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.opt.n_inst, bias=False))
                     
                     
                     # architecture 1
-                    self.mask_mlp.append(nn.Linear(64, self.mask_mlp_dim, bias=False))
+                    # self.mask_mlp.append(nn.Linear(64, self.mask_mlp_dim, bias=False))
                     
-                    self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
-                    self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    # self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
+                    # self.mask_mlp.append(nn.Linear(32+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
                     
-                    self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.opt.n_inst, bias=False))
+                    # self.mask_mlp.append(nn.Linear(self.mask_mlp_dim, self.opt.n_inst, bias=False))
                 elif self.opt.adaptive_mlp_type == 'density':
                     self.mask_mlp.append(nn.Linear(self.grid_in_dim, self.mask_mlp_dim, bias=False))
                     self.mask_mlp.append(nn.Linear(64+self.mask_mlp_dim, self.mask_mlp_dim, bias=False))
@@ -284,7 +287,7 @@ class NeRFNetwork(NeRFRenderer):
             params.extend([
                 {'params': self.s_grid.parameters(), 'lr': lr},
                 {'params': self.samvit_mlp.parameters(), 'lr': lr},
-                {'params': self.norm_layer.parameters(), 'lr': lr},
+                # {'params': self.norm_layer.parameters(), 'lr': lr},
             ])
 
         if self.opt.with_mask:

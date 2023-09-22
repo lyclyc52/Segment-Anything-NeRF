@@ -191,12 +191,6 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
                 # print(mask_point_x, mask_point_y)
                 inds_x = torch.clamp(mask_point_x-patch_size//2, min=0, max=H-patch_size-1).long()
                 inds_y = torch.clamp(mask_point_y-patch_size//2, min=0, max=W-patch_size-1).long()
-                
-            
-            
-
-
-                
             else:
                 # random sample left-top cores.
                 
@@ -223,9 +217,19 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
             inds = inds.view(-1, 2)  # [N, 2]
             inds = inds[..., 0] * W + inds[..., 1]  # [N], flatten
             
-            
+        
+        elif patch_size == 1 and not random_sample:
+            inds_coarse = torch.multinomial(incoherent_mask.to(torch.float32), N, replacement=False) # [B, N], but in [0, 128*128)
+            B = poses.shape[0]
+            # map to the original resolution with random perturb.
+            inds_x, inds_y = inds_coarse // 128, inds_coarse % 128 # `//` will throw a warning in torch 1.10... anyway.
+            sx, sy = H / incoherent_mask_size, W / incoherent_mask_size
+            inds_x = (inds_x * sx + torch.rand(B, N, device=device) * sx).long().clamp(max=H - 1)
+            inds_y = (inds_y * sy + torch.rand(B, N, device=device) * sy).long().clamp(max=W - 1)
+            inds = inds_x * W + inds_y
+            inds = inds[0]
 
-
+            results['inds_coarse'] = inds_coarse # need this when updating error_map
         else:  # random sampling
             inds = torch.randint(
                 0, H*W, size=[N], device=device)  # may duplicate
@@ -260,12 +264,13 @@ def get_rays(poses, intrinsics, H, W, N=-1, patch_size=1, coords=None, device='c
     
     
 
-    if incoherent_mask is not None and include_incoherent_region:
+    # if incoherent_mask is not None and include_incoherent_region and patch_size > 1:
+    if results.get('inds_coarse') == None:
         inds_x, inds_y = inds // W, inds % W
         sx_coarse, sy_coarse = incoherent_mask_size / H, incoherent_mask_size / W
         inds_coarse_x = (inds_x * sx_coarse).long()
         inds_coarse_y = (inds_y * sy_coarse).long()
-    
+
         results['inds_coarse'] = (inds_coarse_x * incoherent_mask_size + inds_coarse_y).long()
 
     # visualize_rays(rays_o[0].detach().cpu().numpy(), rays_d[0].detach().cpu().numpy())
@@ -739,7 +744,7 @@ class Trainer(object):
     #     return rgb_loss
     
     # rgb loss version 2
-    def rgb_similarity_loss(self, rgb, inst_masks, gt_flattened, use_pred_logistics = False):
+    def rgb_similarity_loss(self, rgb, inst_masks, gt_flattened, incoherent, use_pred_logistics = False):
         '''
         Args:
             local_*** : [num of local samples, local patch size ^2, -1]
@@ -748,8 +753,27 @@ class Trainer(object):
 
         # random sample some points
         
-        weights = torch.ones(rgb.shape[1]).expand(rgb.shape[0], -1).to(rgb.device)
-        sample_index = torch.multinomial(weights, num_samples=self.opt.rgb_similarity_num_sample, replacement=False)
+        # print(rgb.shape)
+        # print(incoherent.shape)
+        # rgb_save = rgb.view(self.opt.num_local_sample, self.opt.local_sample_patch_size, self.opt.local_sample_patch_size, -1)
+        # incoherent_save = incoherent.view(self.opt.num_local_sample, self.opt.local_sample_patch_size, self.opt.local_sample_patch_size, -1)     
+        # np.save('debug/rgb.npy', rgb_save.cpu().numpy())
+        # np.save('debug/error.npy', incoherent_save.detach().cpu().numpy())         
+        # exit()
+        
+        # weights = torch.ones(rgb.shape[1]).expand(rgb.shape[0], -1).to(rgb.device)
+        weights = 1. - incoherent[..., 0].to(torch.float32)
+        weights = (weights > 0.8).to(torch.float32)
+        invalid_inds =  weights.sum(-1) == 0
+
+        invalid_inds_size = invalid_inds.sum()
+        weights[invalid_inds] = torch.ones(rgb.shape[1]).expand(invalid_inds_size, -1).to(rgb.device) 
+        num_sample = self.opt.rgb_similarity_num_sample
+        
+        # if (weights.sum(-1) < num_sample).sum() > 0:
+        #     num_sample = weights.sum().min()[0]
+    
+        sample_index = torch.multinomial(weights, num_samples=num_sample, replacement=False)
         
         
         col_ids = torch.arange(rgb.shape[0], dtype=torch.int64).to(rgb.device)
@@ -762,7 +786,7 @@ class Trainer(object):
         if not use_pred_logistics:
             sample_mask_arg =  torch.argmax(sample_mask, -1)
             sample_mask = torch.zeros_like(sample_mask, device=sample_mask.device)
-            sample_mask= sample_mask.scatter_(-1, sample_mask_gt[..., None], 1)
+            sample_mask= sample_mask.scatter_(-1, sample_mask_arg[..., None], 1)
 
 
         # gt_masks
@@ -929,7 +953,9 @@ class Trainer(object):
  
                 if labeled.sum() > 0:
                     # [B*N], loss fn with reduction='none'
-                    loss = -torch.log(torch.gather(pred_masks_flattened[labeled], -1, gt_masks_flattened[labeled][..., None]))
+                    gt_loss_pred_masks_flattened = pred_masks_flattened[:self.opt.num_rays]
+                    gt_loss_gt_masks_flattened = gt_masks_flattened[:self.opt.num_rays]
+                    loss = -torch.log(torch.gather(gt_loss_pred_masks_flattened, -1, gt_loss_gt_masks_flattened[..., None]))
                     
                 else:
                     loss = torch.tensor(0).to(
@@ -939,29 +965,47 @@ class Trainer(object):
                     loss = (1 - data['incoherent_masks'] + self.opt.incoherent_uncertainty_weight * data['incoherent_masks']) * loss
                 
                 if self.error_map is not None:
+                    
+                    
                     index = data['index'] # [B]
                     inds = data['inds_coarse']# [B]
+                    global_inst_masks = inst_masks[:self.opt.num_rays]
+                    if isinstance(index, list):
+                        
+
+                        # take out, this is an advanced indexing and the copy is unavoidable.
+                        error_map = self.error_map[index] # [B, H * W]
+
+                        sample_mask_gt = torch.zeros_like(gt_loss_pred_masks_flattened, device=gt_loss_pred_masks_flattened.device)
+                        sample_mask_gt= sample_mask_gt.scatter_(-1, gt_loss_gt_masks_flattened[..., None], 1)
+                        
+                        pred_masks_similarity = F.cosine_similarity(global_inst_masks, sample_mask_gt, dim=-1)
+                        error = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
+
+                        
+                        # ema update
+                        ema_error = 0.1 * error_map.gather(1, inds) + 0.9 * error
+                        error_map.scatter_(1, inds, ema_error)
+
+                        # put back
+                        self.error_map[index] = error_map
+                        
+                        
+                    else:
+                        sample_mask_gt = torch.zeros_like(gt_loss_pred_masks_flattened, device=gt_loss_pred_masks_flattened.device)
+                        sample_mask_gt= sample_mask_gt.scatter_(-1, gt_loss_gt_masks_flattened[..., None], 1)
+                        
+                        pred_masks_similarity = F.cosine_similarity(global_inst_masks, sample_mask_gt, dim=-1)
+                        error = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
+
+                        ema_error = 0.1 * self.error_map[index, inds] + 0.9 * error
+                        self.error_map[index, inds] = ema_error
+                    
+                    
                     
 
-                    # take out, this is an advanced indexing and the copy is unavoidable.
                     
-
-
-                    
-                    sample_mask_gt = torch.zeros_like(pred_masks_flattened, device=pred_masks_flattened.device)
-                    sample_mask_gt= sample_mask_gt.scatter_(-1, gt_masks_flattened[..., None], 1)
-                    
-                    pred_masks_similarity = F.cosine_similarity(inst_masks, sample_mask_gt, dim=-1)
-                    error = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
-                    # ema update
-                    # print(error_map.shape)
-                    # print(inds.shape)
-                    
-                    ema_error = 0.1 * self.error_map[index, inds] + 0.9 * error
-                    self.error_map[index, inds] = ema_error
-                    
-                    
-                    # np.save(f'./debug/error_{self.epoch}.npy', self.train_loader._data.error_map.detach().cpu().numpy())
+                    np.save(f'./debug/error_{self.epoch}.npy', self.error_map.detach().cpu().numpy())
                     # put back
                     # self.error_map[index] = error_map
                 loss = loss.mean()
@@ -975,6 +1019,7 @@ class Trainer(object):
                     if self.opt.mixed_sampling:
                         
                         local_inst_masks = inst_masks[self.opt.num_rays:]
+                        # data['']
                         local_inst_masks = local_inst_masks.view(self.opt.num_local_sample, self.opt.local_sample_patch_size*self.opt.local_sample_patch_size, -1)
                         
                         local_rgb = outputs['image'][self.opt.num_rays:]
@@ -982,12 +1027,21 @@ class Trainer(object):
                         local_gt_flattened = gt_masks_flattened[self.opt.num_rays:]
                         local_gt_flattened = local_gt_flattened.view(self.opt.num_local_sample, self.opt.local_sample_patch_size*self.opt.local_sample_patch_size, -1)
                         
-
-                        loss = loss + self.rgb_similarity_loss(local_rgb, local_inst_masks, local_gt_flattened, use_pred_logistics = self.opt.rgb_similarity_use_pred_logistics) \
+                        
+                        if self.opt.error_map:
+                            local_error_maps = data['error_maps'][self.opt.num_rays:]
+                            local_error_maps = local_error_maps.view(self.opt.num_local_sample, self.opt.local_sample_patch_size*self.opt.local_sample_patch_size, -1)
+                        
+                            
+                            loss = loss + self.rgb_similarity_loss(local_rgb, local_inst_masks, local_gt_flattened, local_error_maps, use_pred_logistics = self.opt.rgb_similarity_use_pred_logistics) \
                                                                    * self.opt.rgb_similarity_loss_weight
                        
+                        else:
+                            local_incoherent = data['incoherent_masks'][self.opt.num_rays:]
+                            local_incoherent = local_incoherent.view(self.opt.num_local_sample, self.opt.local_sample_patch_size*self.opt.local_sample_patch_size, -1)
                         
-
+                            loss = loss + self.rgb_similarity_loss(local_rgb, local_inst_masks, local_gt_flattened, local_incoherent, use_pred_logistics = self.opt.rgb_similarity_use_pred_logistics) \
+                                                                   * self.opt.rgb_similarity_loss_weight
 
                     else:
                         loss = loss + self.rgb_similarity_loss(outputs['image'].detach()[None, ...], inst_masks[None, ...], 
@@ -1180,6 +1234,7 @@ class Trainer(object):
             bg_color = bg_color.to(self.device)
 
         # full resolution RGBD query, do not query feats!
+        
         outputs = self.model.render(rays_o, rays_d, staged=True, index=index, bg_color=bg_color,
                                     perturb=perturb, cam_near_far=cam_near_far, return_feats=False, return_mask=self.opt.with_mask)
 
@@ -1392,7 +1447,8 @@ class Trainer(object):
 
 
         # get a ref to error_map
-        self.error_map = train_loader._data.error_map
+        
+        self.error_map = train_loader._data.error_map if self.opt.error_map else None
         
         for epoch in range(self.epoch + 1, max_epochs + 1):
             self.epoch = epoch
@@ -1630,26 +1686,54 @@ class Trainer(object):
             pred_mask = torch.stack([inst_mask[..., :-1].sum(-1), inst_mask[..., -1]], -1)
         else:
             pred_mask = torch.sigmoid(inst_mask)
-        return pred_mask.argmax(-1)
+        return pred_mask
+    
+    
+    def update_ground_truth(self, loader, rendered_masks):
+
+        H, W = loader._data.confident_masks.shape[1:3]
+        rendered_masks = rendered_masks[:, None, ...]
+        rendered_masks = F.interpolate(rendered_masks, (H, W), mode='bilinear')
+
+       
+        # loader._data.confident_masks = loader._data.confident_masks * 0.7 + rendered_masks.permute(0,2,3,1) * 0.3
+        # loader._data.masks = (loader._data.confident_masks >= 0.4).to(torch.float32)
+        
+        confident_map = loader._data.confident_masks * 0.3 + rendered_masks.permute(0,2,3,1) * 0.7
+        loader._data.masks = (confident_map >= 0.4).to(torch.float32)
+        # np.save('debug/render.npy', rendered_masks.detach().cpu().numpy())
+        # np.save('debug/masks_{}.npy', loader._data.masks.detach().cpu().numpy())
+        
+        
         
     def update_incoherent_mask(self, loader):
         
         self.model.eval()
         rendered_mask_list = []
-        for index  in range(len(loader._data.poses)):
-            data = loader._data.collate_mask(index)
-            mask = self.render_mask(data)
-            rendered_mask_list.append(mask)
-        rendered_masks = torch.stack(rendered_mask_list, 0)[..., None]
-        loader._data.incoherent_masks = get_incoherent_mask(rendered_masks.permute(0,3,1,2), sfact=2)  
-        loader._data.incoherent_masks = loader._data.incoherent_masks.permute(0,2,3,1).to(torch.bool)[..., 0]
-        np.save('debug/files.npy', loader._data.incoherent_masks.detach().cpu().numpy())
+        with torch.no_grad():
+            for index  in range(len(loader._data.poses)):
+                data = loader._data.collate_mask(index)
+                mask = self.render_mask(data)
+                rendered_mask_list.append(mask)
+        rendered_masks_softmax = torch.stack(rendered_mask_list, 0).detach()
+        rendered_masks = rendered_masks_softmax.argmax(-1)[:, None, ...]
+
+        
+        # exit()
+        loader._data.incoherent_masks = get_incoherent_mask(rendered_masks, sfact=2)  
+        np.save(f'debug/files_.npy', rendered_masks.detach().cpu().numpy())
+        loader._data.incoherent_masks = loader._data.incoherent_masks.to(torch.bool)[:, None, ...]
+
         loader._data.incoherent_masks = loader._data.incoherent_masks.view(-1, 
                                         loader._data.incoherent_mask_size*loader._data.incoherent_mask_size)
         
+        
+        # self.update_ground_truth(loader, rendered_masks_softmax[..., 1])
         self.model.train()
-        exit()
-        return 
+
+
+
+
     def train_one_epoch(self, loader):
         
         self.log(
@@ -1685,8 +1769,9 @@ class Trainer(object):
             with torch.cuda.amp.autocast(enabled=self.opt.fp16):
                 preds, truths, loss_net = self.train_step(data)
 
-            if self.global_step % self.opt.multi_res_iter == 0 and self.global_step != 0:
-                self.update_incoherent_mask(loader)
+            # if self.global_step % self.opt.incoherent_update_iter == 0 and self.global_step >= self.opt.rgb_similarity_iter:
+            #     self.update_incoherent_mask(loader)
+
             
             loss = loss_net
             if self.opt.use_wandb:

@@ -11,6 +11,9 @@ import torch.nn.functional as F
 import argparse
 import json
 
+
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 def show_points(coords, labels, ax, marker_size=375):
     pos_points = coords[labels==1]
     neg_points = coords[labels==0]
@@ -64,12 +67,7 @@ def main(args, pts_3D, input_label):
     camera_poses = args.camera_poses
     output_root = args.output_root
 
-
     
-    
-    sam = sam_model_registry_baseline[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-    predictor = SamPredictor(sam)
 
 
     os.makedirs(output_root, exist_ok=True)
@@ -87,9 +85,15 @@ def main(args, pts_3D, input_label):
     intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
 
 
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    if args.sam_type == 'sam':
+        sam = sam_model_registry_baseline[model_type](checkpoint=sam_checkpoint)
+    elif args.sam_type == 'hq_sam':
+        sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+    
     sam.to(device=device)
     predictor = SamPredictor(sam)
+
+
 
     rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[0]}_rgb.png')
     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
@@ -124,6 +128,7 @@ def main(args, pts_3D, input_label):
         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         p,n = poses[frame_names[i]], intrinsics
+        
         p = np.array(p).astype(np.float32)
         # p[:,1] = -p[:, 1]
         # p[:,2] = -p[:, 2]
@@ -132,7 +137,8 @@ def main(args, pts_3D, input_label):
 
         d = np.load(depth_name)[..., None]
 
-
+        pts_ids = np.arange(pts_3D.shape[0])
+   
         pts_2D, pts_depth = project_to_2d(pts_3D, p, n, H = r.shape[0], W = r.shape[1])
         
         valid =  np.logical_and.reduce((pts_2D[..., 1] < d.shape[0], pts_2D[..., 0] < d.shape[1],
@@ -154,6 +160,7 @@ def main(args, pts_3D, input_label):
         pts_2D = pts_2D[valid]
         pts_depth = pts_depth[valid]
         pts_label = input_label[valid]
+        pts_ids = pts_ids[valid]
 
 
         im_depth = torch.from_numpy(d[pts_2D[...,1], pts_2D[..., 0]])
@@ -180,46 +187,63 @@ def main(args, pts_3D, input_label):
         
         pts_2D = pts_2D[valid]
         pts_label = pts_label[valid]
+        pts_ids = pts_ids[valid]
         
         
         
-
-        if args.use_nerf_feature:
-            f = np.load(feature_name)[0]
-            f = downsample_sam_feature(f)
-            predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
-        else:
-            predictor.set_image(r)
+        if args.decode:
+            if args.use_nerf_feature:
+                f = np.load(feature_name)[0]
+                f = downsample_sam_feature(f)
+                predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
+            else:
+                predictor.set_image(r)
+            
+            masks, scores, logits = predictor.predict(
+                point_coords=pts_2D.numpy(),
+                point_labels=pts_label,
+                multimask_output=True,
+                hq_token_only=True
+            )
+            
+            max_score = 0
+            index = 0
+            for j, (mask, score) in enumerate(zip(masks, scores)):
+                if score > max_score:
+                    max_score = score
+                    index = j
+            
+            # print(masks[index][..., None].shape)
+            np.save(output_file, masks[index][..., None])
+            output_file = os.path.join(output_root, f'{frame_names[i]}_masks.png')
+            plt.figure(figsize=(10,10))
+            plt.imshow(r)
+            show_mask(masks[index], plt.gca())
+            show_points(pts_2D, pts_label, plt.gca())
+            plt.title(f"Mask {i+1}, Score: {scores[index]:.3f}", fontsize=18)
+            plt.axis('on')
+            plt.savefig(output_file)
+            plt.close()
+            # for pp in range(pts_ids.shape[0]):
+            #     print(pts_ids[pp])
+            #     show_points(pts_2D[pp:pp+1], pts_label[pp:pp+1], plt.gca())
+            #     plt.title(f"Mask {i+1}, Score: {scores[index]:.3f}", fontsize=18)
+            #     plt.axis('on')
+            #     plt.savefig(output_file.replace('.png', f'{pp}.png' ))
+                
+            # exit()
         
-        masks, scores, logits = predictor.predict(
-            point_coords=pts_2D.numpy(),
-            point_labels=pts_label,
-            multimask_output=True,
-        )
-
-        if valid.sum() >= args.valid_threohould:
+        crucial = False
+        for j in args.crucial_point_index:
+            if j in pts_ids:
+                crucial = True
+                break
+        if valid.sum() >= args.valid_threohould and crucial:
             valid_count[frame_names[i]] = 1
         else:
             valid_count[frame_names[i]] = 0
         
-        max_score = 0
-        index = 0
-        for j, (mask, score) in enumerate(zip(masks, scores)):
-            if score > max_score:
-                max_score = score
-                index = j
         
-        # print(masks[index][..., None].shape)
-        np.save(output_file, masks[index][..., None])
-        output_file = os.path.join(output_root, f'{frame_names[i]}_masks.png')
-        plt.figure(figsize=(10,10))
-        plt.imshow(r)
-        show_mask(masks[index], plt.gca())
-        show_points(pts_2D, pts_label, plt.gca())
-        plt.title(f"Mask {i+1}, Score: {scores[index]:.3f}", fontsize=18)
-        plt.axis('on')
-        plt.savefig(output_file)
-        plt.close()
         
         
         
@@ -427,8 +451,13 @@ def create_video():
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
-    parser.add_argument('--device', type=str, default='cuda:3')
+    parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth')
+    # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
+    parser.add_argument('--sam_type', type=str,
+                        default='sam', choices=['sam', 'hq_sam'])
+
+
+    parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--model_type', type=str, default='vit_h')
     parser.add_argument('--threshold', type=float, default=0.05)
     parser.add_argument('--epoch', type=str, default='0029')
@@ -438,9 +467,11 @@ if __name__ == '__main__':
     # parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam/validation')
     
     
-    parser.add_argument('--valid_threohould', type=int, default=5)
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/Datasets/garden/table_negative')
+    parser.add_argument('--valid_threohould', type=int, default=4)
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/Datasets/garden/table_vase_nerf')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
+    parser.add_argument('--decode', action='store_true', help='generate mask if true')
+    parser.add_argument('--crucial_point_index', type=int, nargs='*', default=[3], help="num steps sampled per ray for each proposal level")
     
     
     # parser.add_argument('--threshold', type=float, default=0.1)
@@ -499,21 +530,34 @@ if __name__ == '__main__':
     
     
     # # test case 4: garden
-    pts_3D = torch.tensor([[ 0.1772,  0.0180, -0.4012],
-                        [-0.1294,  0.2618, -0.3944],
-                        [-0.1300,  0.0416, -0.4265],
-                        [-0.1215,  0.0604, -0.4093],
-                        [-0.0517,  0.0580, -0.6673],
-                        [ 0.0532, -0.1099, -0.6656],
-                        [ 0.1468,  0.1817, -0.6530],
-                        # [-0.1656,  0.2856, -0.6465],
-                        # [-0.2695, -0.0262, -0.6177],
-                        # negative points
-                        [-0.0422,  0.0305, -0.3319],
-                        [-0.0534,  0.1006, -0.3437]])
+    # pts_3D = torch.tensor([[ 0.1772,  0.0180, -0.4012],
+    #                     [-0.1294,  0.2618, -0.3944],
+    #                     [-0.1300,  0.0416, -0.4265],
+    #                     [-0.1215,  0.0604, -0.4093],
+    #                     [-0.0517,  0.0580, -0.6673],
+    #                     [ 0.0532, -0.1099, -0.6656],
+    #                     [ 0.1468,  0.1817, -0.6530],
+    #                     # [-0.1656,  0.2856, -0.6465],
+    #                     # [-0.2695, -0.0262, -0.6177],
+    #                     # negative points
+    #                     [-0.0422,  0.0305, -0.3319],
+    #                     [-0.0534,  0.1006, -0.3437]])
+    # input_label = np.ones(pts_3D.shape[0])
+    
+    # input_label[-2:] = 0
+    
+    
+    # test case 5: garden
+    pts_3D = torch.tensor([[ 0.1554, -0.0071, -0.4008],
+                        [-0.2675,  0.1471, -0.3918],
+                        [-0.0962,  0.0480, -0.4486],
+                        [-0.0503,  0.0809, -0.6661],
+                        [-0.0384,  0.0431, -0.2802],
+                        [-0.0732,  0.0417, -0.2275]])
     input_label = np.ones(pts_3D.shape[0])
     
-    input_label[-2:] = 0
+    # input_label[-2:] = 0
+
     
 
     

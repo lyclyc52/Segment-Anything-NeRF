@@ -116,7 +116,8 @@ class ColmapDataset:
         # self.offset = opt.offset # camera offset
         self.fp16 = opt.fp16 # if preload, load into fp16.
         self.root_path = opt.path # contains "colmap_sparse"
-
+        self.origin_num_local_sample = opt.num_local_sample
+        self.origin_local_sample_patch_size = opt.local_sample_patch_size
         self.training = self.type in ['train', 'all', 'trainval']
 
         # locate colmap dir
@@ -152,7 +153,7 @@ class ColmapDataset:
 
 
         img_names = [os.path.basename(imdata[k].name) for k in imkeys]
-        self.img_names = img_names
+        self.img_names = np.array(img_names)
 
 
         img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
@@ -365,6 +366,7 @@ class ColmapDataset:
                 feature_paths = feature_paths[train_ids]
                 if self.opt.with_mask:
                     mask_paths = mask_paths[train_ids]
+                    self.img_names = self.img_names[train_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[train_ids]
             elif self.type == 'val':
@@ -374,11 +376,13 @@ class ColmapDataset:
                 feature_paths = feature_paths[val_ids]
                 if self.opt.with_mask:
                     mask_paths = mask_paths[val_ids]
+                    self.img_names = self.img_names[val_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[val_ids]
             # else: trainval use all.
             
             # read images
+
             if not self.opt.with_sam and not self.opt.with_mask:
                 self.images = []
                 for f in tqdm.tqdm(img_paths, desc=f'Loading {self.type} image'):
@@ -417,51 +421,69 @@ class ColmapDataset:
                     f = f.replace('.jpg', '_masks.npy').replace('.JPG', '_masks.npy').replace('.png', '_masks.npy').replace('.PNG', '_masks.npy')
                     mask = torch.from_numpy(np.load(f))
                     
+                    
+                    # mask_list = ['DSC07956', 'DSC07957', 'DSC07958', 'DSC07959', 'DSC07960', 'DSC07961', 'DSC07963',
+                    #              'DSC07964', 'DSC07969', 'DSC07970', 'DSC07971', 'DSC07982', 'DSC07984',
+                    #              'DSC07985', 'DSC07987',
+                    #              'DSC08029', 'DSC08032', 'DSC08033', 'DSC08034', 'DSC08035'
+                    #              ]
                     if self.training:
-                        if mask.sum()>=10 and validate_file(f) and valid_dict[img_names[idx][:-4]]:
+
+                        if mask.sum()>=10 and validate_file(f) and valid_dict[self.img_names[idx][:-4]]:
                             self.valid_mask_index_list.append(idx)
-                    # if mask.sum()>=10 and validate_file(f):
-                    #     self.valid_mask_index.append(idx)
+                        # if self.img_names[idx][:-4] in mask_list:
+                        #     self.valid_mask_index_list.append(idx)    
+
                 
                     self.masks.append(mask.to(int))
                 self.masks = torch.stack(self.masks, axis=0)
+
                 
-                self.H, self.W = self.masks.shape[1], self.masks.shape[2]
+                self.origin_H, self.origin_W = self.masks.shape[1], self.masks.shape[2]
+                self.H, self.W = self.origin_H, self.origin_W
                 if self.opt.rgb_similarity_loss_weight > 0 or self.opt.incoherent_uncertainty_weight < 1:
                     self.gt_incoherent_masks = get_incoherent_mask(self.masks.permute(0,3,1,2), sfact=2)                    
                     self.gt_incoherent_masks = self.gt_incoherent_masks.permute(0,2,3,1).to(torch.bool)[..., 0]
                     self.gt_incoherent_masks = self.gt_incoherent_masks.view(-1, self.H*self.W)
-                    # np.save('debug/incoherent.npy', self.incoherent_masks.numpy())
                 else:
                     self.gt_incoherent_masks = None
                 
                 if self.training:
-                    self.valid_mask_index_list = self.valid_mask_index_list[::8]
+                    self.valid_mask_index_list = np.array(self.valid_mask_index_list)
+                    
+                    self.valid_mask_index_list = self.valid_mask_index_list[::2]
+                    sample_num = len(self.valid_mask_index_list)
+                    if sample_num < 20:
+                        add_sample = np.random.choice(self.valid_mask_index_list, 20 - sample_num)
+                        self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
+        
                     self.valid_mask_index = torch.tensor(self.valid_mask_index_list).to(torch.int)
                 
                     self.poses = self.poses[self.valid_mask_index]
                     self.masks = self.masks[self.valid_mask_index]
+                    self.confident_masks = self.masks.clone()
                     self.img_names = [self.img_names[idx] for idx in self.valid_mask_index_list]
                     if self.gt_incoherent_masks is not None:
                         self.gt_incoherent_masks = self.gt_incoherent_masks[self.valid_mask_index]
                     if self.cam_near_far is not None:
                         self.cam_near_far = self.cam_near_far[self.valid_mask_index]
                     np.save('./debug/masks.npy', self.masks.numpy())
-                if self.training and self.opt.error_map:
-                    self.error_map = torch.ones([self.masks.shape[0], self.opt.error_map_size * self.opt.error_map_size], dtype=torch.float) # [B, 128 * 128], flattened for easy indexing, fixed resolution...
+                    # exit()
+                    if self.opt.error_map:
+                        self.error_map = torch.ones([self.masks.shape[0], self.opt.error_map_size * self.opt.error_map_size], dtype=torch.float) # [B, 128 * 128], flattened for easy indexing, fixed resolution...
                 else:
                     self.error_map = None
                 # self.valid_mask_index = []
                 # print(len(self.valid_mask_index))
                 # exit()
                 # self.valid_mask_index = np.array(self.valid_mask_index)
-                
-                
 
             else:
                 self.masks = None
+                self.confident_masks = None
                 self.gt_incoherent_masks = None
-
+                self.error_map = None
+        
         # view all poses.
         if self.opt.vis_pose:
             visualize_poses(self.poses, bound=self.opt.bound, points=self.pts3d)
@@ -488,21 +510,24 @@ class ColmapDataset:
                 self.masks = self.masks.to(self.device)
                 if self.training:
                     self.valid_mask_index = self.valid_mask_index.to(self.device)
+                    if self.confident_masks is not None:
+                        self.confident_masks = self.confident_masks.to(self.device)
             if self.gt_incoherent_masks is not None:
                 self.gt_incoherent_masks = self.gt_incoherent_masks.to(self.device)
-            if self.cam_near_far is not None:
-                self.cam_near_far = self.cam_near_far.to(self.device)
-
+            
             if self.error_map is not None:
                 self.error_map = self.error_map.to(self.device)
-                
+            if self.cam_near_far is not None:
+                self.cam_near_far = self.cam_near_far.to(self.device)
                 
         if self.opt.use_dynamic_incoherent:
-            self.incoherent_mask_size = int(self.H / pow(2, self.opt.max_multi_res_level + 1))
+            self.incoherent_mask_size = int(self.H / self.opt.incoherent_downsample_scale)
             self.incoherent_masks = None
         else:
             self.incoherent_mask_size = self.H
             self.incoherent_masks = self.gt_incoherent_masks
+            
+        
     
     
     def collate_mask(self, index):
@@ -536,6 +561,37 @@ class ColmapDataset:
     def collate(self, index):
         num_rays = -1 # defaul, eval, test, train SAM use all rays
         random_sample = False
+        
+
+        if self.training and self.opt.use_multi_res and self.global_step > self.opt.rgb_similarity_iter:
+            
+            multi_res_step = self.global_step - self.opt.rgb_similarity_iter
+            if (multi_res_step - 1 % self.opt.multi_res_update_iter) == 0:
+                downsample_level = multi_res_step // self.opt.multi_res_update_iter
+                downsample_scale = pow(2, max(0, self.opt.max_multi_res_level - downsample_level))
+            
+            
+                self.H, self.W = self.origin_H // downsample_scale, self.origin_W // downsample_scale
+                if self.masks is not None:
+                    self.masks = F.interpolate(self.confident_masks.float().permute(0,3,1,2), (self.H, self.W), mode='bilinear')
+                    self.masks = self.masks.permute(0,2,3,1).long()
+                if self.incoherent_masks is not None:
+                    self.incoherent_masks = F.interpolate(self.incoherent_masks.float().permute(0,3,1,2), (self.H, self.W), mode='bilinear')
+                    self.incoherent_mask_size = self.H
+                    self.incoherent_masks = self.incoherent_masks.permute(0,2,3,1).long()
+                if self.error_map is not None:
+                    self.error_map = self.error_map.view(-1, self.opt.error_map_size, self.opt.error_map_size)
+                    self.error_map = F.interpolate(self.error_map[:, None, ...], (self.H, self.W), mode='bilinear')
+                    self.error_map = self.error_map[:, 0, ...]
+                    self.opt.error_map_size = self.H
+                    self.error_map = self.error_map.view(-1, self.opt.error_map_size * self.opt.error_map_size)
+                    
+                    
+                self.opt.num_local_sample = (self.origin_num_local_sample // downsample_scale) // downsample_scale
+                self.opt.local_sample_patch_size = self.origin_local_sample_patch_size // downsample_scale
+
+        if self.training and self.global_step > self.opt.rgb_similarity_iter:
+            self.opt.random_image_batch = True
         if self.training and not self.opt.with_sam:
             num_rays = self.opt.num_rays
             if self.opt.random_image_batch:
@@ -551,6 +607,7 @@ class ColmapDataset:
         
 
         H, W = self.H, self.W
+
         poses = self.poses[index] # [1/N, 4, 4]
         intrinsics = self.intrinsics[index] # [1/N, 4]
         
@@ -574,7 +631,7 @@ class ColmapDataset:
         
         if self.opt.with_mask:
             
-            H = W = self.opt.online_resolution 
+            # H = W = self.opt.online_resolution 
             fovy = 60
             focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
             intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
@@ -609,11 +666,15 @@ class ColmapDataset:
         # This part is for sampling in local sense
         
         if self.opt.mixed_sampling and self.training and self.global_step > self.opt.rgb_similarity_iter:
+
             local_indices = torch.randint(0, len(self.poses), size=(self.opt.num_local_sample,), device=self.device if self.preload else 'cpu')
             local_indices_expand = local_indices[..., None].expand(-1, self.opt.local_sample_patch_size * self.opt.local_sample_patch_size)
             local_indices_expand = local_indices_expand.reshape(-1)
 
             local_poses = self.poses[local_indices_expand]
+
+                
+
             
             if self.opt.error_map:
                 local_error_map = None if self.error_map is None else self.error_map[local_indices]
@@ -623,6 +684,7 @@ class ColmapDataset:
                                 random_sample=False)
             else:
                 local_incoherent_mask = self.incoherent_masks[local_indices] if self.incoherent_masks is not None else None
+                
                 local_rays = get_rays(local_poses, intrinsics, H, W, 1, device=self.device if self.preload else 'cpu', 
                                 patch_size=self.opt.local_sample_patch_size, incoherent_mask=local_incoherent_mask,
                                 include_incoherent_region=True, incoherent_mask_size=self.H,
@@ -671,18 +733,47 @@ class ColmapDataset:
         
         if self.incoherent_masks is not None:
             if num_rays != -1:
-                incoherent_masks = self.incoherent_masks[index, rays['j']* self.W + rays['i']] # [N]
+                incoherent_scale = self.incoherent_mask_size / self.H
+                
+                r_j = (rays['j'] * incoherent_scale).long()
+                r_i = (rays['i'] * incoherent_scale).long()
+                
+                incoherent_masks = self.incoherent_masks[index, r_j* self.incoherent_mask_size + r_i] # [N]
                 if self.opt.mixed_sampling and self.global_step > self.opt.rgb_similarity_iter:
-                    local_incoherent_masks = self.incoherent_masks[local_indices_expand, local_rays['j']* self.W +  local_rays['i']]
+                    local_r_j = (local_rays['j'] * incoherent_scale).long()
+                    local_r_i = (local_rays['i'] * incoherent_scale).long()
+                    local_incoherent_masks = self.incoherent_masks[local_indices_expand, local_r_j* self.incoherent_mask_size + local_r_i]
                     incoherent_masks = torch.cat([incoherent_masks, local_incoherent_masks], 0)
             else:
                 incoherent_masks = self.incoherent_masks[index].squeeze(0) # [H, W]
                 
                 
             if self.training:
-                incoherent_masks = masks.view(-1)
+                incoherent_masks = incoherent_masks.view(-1)
             results['incoherent_masks'] = incoherent_masks.to(self.device)
 
+
+        if self.error_map is not None:
+            if num_rays != -1:
+                error_scale = self.opt.error_map_size / self.H
+                
+                r_j = (rays['j'] * error_scale).long()
+                r_i = (rays['i'] * error_scale).long()
+                
+                error_maps = self.error_map[index, r_j* self.opt.error_map_size + r_i] # [N]
+                if self.opt.mixed_sampling and self.global_step > self.opt.rgb_similarity_iter:
+                    
+                    local_r_j = (local_rays['j'] * error_scale).long()
+                    local_r_i = (local_rays['i'] * error_scale).long()
+                    local_error_maps = self.error_map[local_indices_expand, local_r_j* self.opt.error_map_size + local_r_i]
+                    error_maps = torch.cat([error_maps, local_error_maps], 0)
+            else:
+                error_maps = self.error_maps[index].squeeze(0) # [H, W]
+                
+                
+            if self.training:
+                error_maps = error_maps.view(-1)
+            results['error_maps'] = error_maps.to(self.device)
         
         if self.opt.enable_cam_near_far and self.cam_near_far is not None:
             cam_near_far = self.cam_near_far[index] # [1/N, 2]
@@ -698,17 +789,17 @@ class ColmapDataset:
         results['rays_o'] = rays['rays_o'].to(self.device)
         results['rays_d'] = rays['rays_d'].to(self.device)
         results['index'] = index.to(self.device) if torch.is_tensor(index) else index
-        if self.opt.error_map:
+        if self.opt.error_map and self.training:
             results['inds_coarse'] = rays['inds_coarse']
 
-        if self.opt.mixed_sampling and self.global_step > self.opt.rgb_similarity_iter:
+        if self.opt.mixed_sampling and self.training and self.global_step > self.opt.rgb_similarity_iter:
             results['poses'] = torch.cat([results['poses'], local_poses.to(self.device)], 0)
             results['rays_o'] = torch.cat([results['rays_o'], local_rays['rays_o'].to(self.device)], 0)
             results['rays_d'] = torch.cat([results['rays_d'], local_rays['rays_d'].to(self.device)], 0)
-            results['index'] = torch.cat([results['index'], local_indices_expand], 0)
+            # results['index'] = torch.cat([results['index'], local_indices_expand], 0)
  
-            if self.opt.error_map:
-                results['inds_coarse'] = torch.cat([results['inds_coarse'], local_rays['inds_coarse']], 0)
+            # if self.opt.error_map:
+            #     results['inds_coarse'] = torch.cat([results['inds_coarse'], local_rays['inds_coarse']], 0)
 
 
         if self.opt.with_sam and not self.opt.with_mask:
@@ -723,6 +814,8 @@ class ColmapDataset:
         # np.save(f'./debug/error_{self.epoch}.npy', self.error_map.detach().cpu().numpy())
         # print(f"Downloaded the tutorial in {toc - tic:0.4f} seconds")
         
+        
+        # np.save(f'debug/masks_{self.global_step}.npy', self.masks.cpu().numpy())
         return results
 
     def dataloader(self):
