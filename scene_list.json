@@ -1,0 +1,45 @@
+{
+    "mip":[
+        "bonsai",
+        "counter",
+        "garden",
+        "kitchen",
+        "teatime",
+        "shoe_rack",
+        "donuts",
+        "espresso",
+        "waldo_kitchen"
+    ],
+
+    "3dfront": [
+        "3dfront_0019_00",
+        "3dfront_0091_00",
+        "3dfront_0089_00"
+    ],
+
+    "llff": [
+        "horns",
+        "fern",
+        "fenceflower",
+        "fortress",
+        "colinepiano",
+        "cecread",
+        "tincan"
+    ],
+
+    "lift": [
+        "scene0423_02",
+        "replica_room_0",
+        "ai_001_008",
+        "ctr_lift_0",
+        "ctr_lift_1",
+        "ctr_lift_2"
+    ]
+
+
+
+
+
+
+}
+

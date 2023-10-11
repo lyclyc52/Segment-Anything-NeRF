@@ -8,6 +8,7 @@ import numpy as np
 from scipy.spatial.transform import Slerp, Rotation
 
 import trimesh
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -18,8 +19,18 @@ from torch.utils.data import DataLoader
 
 from .utils import get_rays, get_incoherent_mask
 from .colmap_utils import *
+import pyquaternion as pyquat
 
 
+def nerf_matrix_to_ngp(pose, scale=0.33, offset=[0, 0, 0]):
+    # for the fox dataset, 0.33 scales camera radius to ~ 2
+    new_pose = np.array([
+        [pose[1, 0], pose[1, 1], pose[1, 2], pose[1, 3] * scale + offset[0]],
+        [pose[2, 0], pose[2, 1], pose[2, 2], pose[2, 3] * scale + offset[1]],
+        [pose[0, 0], pose[0, 1], pose[0, 2], pose[0, 3] * scale + offset[2]],
+        [0, 0, 0, 1],
+    ], dtype=np.float32)
+    return new_pose
 
 
 
@@ -121,129 +132,431 @@ class ColmapDataset:
         self.training = self.type in ['train', 'all', 'trainval']
 
         # locate colmap dir
-        candidate_paths = [
-            os.path.join(self.root_path, "colmap_sparse", "0"),
-            os.path.join(self.root_path, "sparse", "0"),
-            os.path.join(self.root_path, "colmap"),
-        ]
         
-        self.colmap_path = None
-        for path in candidate_paths:
-            if os.path.exists(path):
-                self.colmap_path = path
-                break
+        
+        
+        
+        
 
-        if self.colmap_path is None:
-            raise ValueError(f"Cannot find colmap sparse output under {self.root_path}, please run colmap first!")
+        
+        if self.opt.data_type != 'mip':
+            if self.opt.data_type == '3dfront':
+                with open(os.path.join(self.root_path, 'transforms.json'), 'r') as f:
+                    transform = json.load(f)  
+                if self.opt.with_mask:
+                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
+                if 'room_bbox' in transform:
+                    room_bbox = np.array(transform['room_bbox'])
+                    self.offset = -(room_bbox[0] + room_bbox[1]) * 0.5 * self.scale
 
-        camdata = read_cameras_binary(os.path.join(self.colmap_path, 'cameras.bin'))
+                self.H = int(transform["h"])
+                self.W = int(transform["w"])
+                
+                img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
+                if not os.path.exists(img_folder):
+                    img_folder = os.path.join(self.root_path, "images")
+                img_paths = []
+                poses = []
+                intrinsics = []
+                cam_near_far = None
+                pose = [] # [4, 4]
+                
+                for frame in transform['frames']:
+                    img_paths.append(os.path.join(self.root_path, frame['file_path']))
+                    pose = nerf_matrix_to_ngp(np.array(frame['transform_matrix'],  dtype=np.float32), scale=1) # this may not be necessary
+                    pose[:, 1:3] = -pose[:, 1:3] 
+                    poses.append(pose)
+                    intrinsics.append(np.array([transform["fl_x"], transform["fl_y"], transform["cx"], transform["cy"]], dtype=np.float32))
+                    # cam_near_far.append(np.array([0.2, 12]))
+                img_names = [os.path.basename(img) for img in img_paths]
+                self.img_names = img_names
+                img_paths = np.array(img_paths)
+                
+                self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
+
+                    
+                self.poses = np.stack(poses)
+                # change the direction of yz to make sure the camera looks at z-
+                self.poses[:, :3, 1:3] *= -1
+
+                self.pts3d = self.poses[:, :3, 3] # [M, 3]
+                self.poses, self.pts3d = center_poses(self.poses, self.pts3d, self.opt.enable_cam_center)
+                
+                if self.scale == -1:
+                    self.scale = 1 / np.linalg.norm(self.poses[:, :3, 3], axis=-1).max()
+                    # self.scale = 0.33
+                    print(f'[INFO] ColmapDataset: auto-scale {self.scale:.4f}')
+
+                self.poses[:, :3, 3] *= self.scale
+                self.pts3d *= self.scale
+
+                # use pts3d to estimate aabb
+                # self.pts_aabb = np.concatenate([np.percentile(self.pts3d, 1, axis=0), np.percentile(self.pts3d, 99, axis=0)]) # [6]
+                self.pts_aabb = np.concatenate([np.min(self.pts3d, axis=0), np.max(self.pts3d, axis=0)]) # [6]
+                if np.abs(self.pts_aabb).max() > self.opt.bound:
+                    print(f'[WARN] ColmapDataset: estimated AABB {self.pts_aabb.tolist()} exceeds provided bound {self.opt.bound}! Consider improving --bound to make scene included in trainable region.')
+
+                
+                feature_folder = os.path.join(self.root_path, 'sam_features')
+                feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+                
+                exist_mask = np.array([os.path.exists(f) for f in img_paths])
+                print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
+                img_paths = img_paths[exist_mask]
+                feature_paths = feature_paths[exist_mask]
+                self.poses = self.poses[exist_mask]
+                self.intrinsics= self.intrinsics[exist_mask]
+                
+            elif self.opt.data_type == 'llff':
+
+                with open(os.path.join(self.root_path, 'transforms.json'), 'r') as f:
+                    transform = json.load(f)
+
+                if self.opt.with_mask:
+                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
 
 
+                self.H = int(transform["h"])
+                self.W = int(transform["w"])
+                
+                img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
+                if not os.path.exists(img_folder):
+                    img_folder = os.path.join(self.root_path, "images")
+                img_paths = []
+                poses = []
+                intrinsics = []
+                cam_near_far = None
+                pose = [] # [4, 4]
+                
+                for frame in transform['frames']:
+                    img_paths.append(os.path.join(self.root_path, frame['file_path']))
+                    pose = nerf_matrix_to_ngp(np.array(frame['transform_matrix'],  dtype=np.float32), scale=1)
+                    pose[:, 1:3] = -pose[:, 1:3] 
+                    poses.append(pose)
+                    intrinsics.append(np.array([transform["fl_x"], transform["fl_y"], transform["cx"], transform["cy"]], dtype=np.float32))
+                    # cam_near_far.append(np.array([0.2, 12]))
+                img_names = [os.path.basename(img) for img in img_paths]
+                self.img_names = img_names
+                img_paths = np.array(img_paths)
+                
+                self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]               
+                self.poses  = np.stack(poses)
+                # change the direction of yz to make sure the camera looks at z-
+                self.poses[:, :3, 1:3] *= -1
+                
+                self.pts3d = self.poses[:, :3, 3] # [M, 3]
 
+                if self.scale == -1:
+                    # self.scale = 1 / self.poses[:, :3, 3].reshape(-1).max()
+                    self.scale = 0.33
+                    print(f'[INFO] ColmapDataset: auto-scale {self.scale:.4f}')
+                self.poses[:, :3, 3] *= self.scale
+                self.pts3d *= self.scale
+
+                # use pts3d to estimate aabb
+                # self.pts_aabb = np.concatenate([np.percentile(self.pts3d, 1, axis=0), np.percentile(self.pts3d, 99, axis=0)]) # [6]
+                self.pts_aabb = np.concatenate([np.min(self.pts3d, axis=0), np.max(self.pts3d, axis=0)]) # [6]
+
+                if np.abs(self.pts_aabb).max() > self.opt.bound:
+                    print(f'[WARN] ColmapDataset: estimated AABB {self.pts_aabb.tolist()} exceeds provided bound {self.opt.bound}! Consider improving --bound to make scene included in trainable region.')
+
+                # self.poses = self.poses[:, [1, 0, 2, 3], :]
+                # self.cam_near_far = torch.from_numpy(np.stack(cam_near_far))
+                
+                feature_folder = os.path.join(self.root_path, 'sam_features')
+                feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+                
+                exist_mask = np.array([os.path.exists(f) for f in img_paths])
+                print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
+                img_paths = img_paths[exist_mask]
+                feature_paths = feature_paths[exist_mask]
+                self.poses = self.poses[exist_mask]
+                self.intrinsics= self.intrinsics[exist_mask]
+                
+            elif self.opt.data_type == 'lift':
+                
+                img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
+                if not os.path.exists(img_folder):
+                    img_folder = os.path.join(self.root_path, "images")
+
+                img_names = os.listdir(img_folder)
+                img_names.sort()
+                self.img_names = img_names
+                img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
+                poses = []
+                intrinsics = []
+
+                self.H, self.W = cv2.imread(img_paths[0]).shape[:2]
+    
+                pose_root = os.path.join(self.root_path, 'metadata.json')
+                if os.path.isfile(pose_root):
+                    with open(pose_root) as f:
+                        meta = json.load(f)
+                    global_intr = np.array(meta['camera']['K'])
+                    global_intr[0] *= self.W 
+                    global_intr[1] *= self.H
+                    global_intr = np.array([global_intr[0,0], global_intr[1,1], global_intr[0,-1], global_intr[1,-1]])
+                    # global_intr = np.array([meta['camera']['focal_length'], meta['camera']['focal_length'], global_intr[0,-1], global_intr[1,-1]])
+
+                    global_intr = np.abs(global_intr, dtype=np.float32)
+
+                    
+                    for i in range(len(meta["camera"]["positions"])):
+                        pose = np.eye(4)
+                        t = np.array(meta["camera"]["positions"][i])
+                        q = np.array(meta["camera"]["quaternions"][i])
+                        rot = pyquat.Quaternion(*q).rotation_matrix
+                        pose[:3, :3] = rot
+                        pose[:3, 3] = t
+
+                        poses.append(pose)
+                        intrinsics.append(global_intr)
+                else:
+                    pose_root = os.path.join(self.root_path, 'pose')
+                    intri_file = os.path.join(self.root_path, 'intrinsic', 'intrinsic_color.txt')
+                    global_intr = np.array([[float(y.strip()) for y in x.strip().split()] for x in Path(intri_file).read_text().splitlines() if x != ''])
+                    global_intr = np.array([global_intr[0,0], global_intr[1,1], global_intr[0,-2], global_intr[1,-2]], dtype=np.float32)
+                    # global_intr = np.array([meta['camera']['focal_length'], meta['camera']['focal_length'], global_intr[0,-1], global_intr[1,-1]])
+                    for name in img_names:
+                        pose_name = os.path.join(pose_root, name[:-3] + 'txt')
+                        pose = np.array([[float(y.strip()) for y in x.strip().split()] for x in Path(pose_name).read_text().splitlines() if x != ''])
+                        pose[:, 1:3] = -pose[:, 1:3] 
+                        poses.append(pose)
+                        intrinsics.append(global_intr)
+                # poses.append(np.linalg.inv( nerf_matrix_to_ngp(np.array(frame['transform_matrix'],  dtype=np.float32), scale=self.scale, offset=self.offset)))
+                # poses.append(nerf_matrix_to_ngp(np.array(frame['transform_matrix'],  dtype=np.float32), scale=self.scale, offset=self.offset))
+                self.poses  = np.stack(poses, axis=0)
+                self.pts3d = self.poses[:, :3, 3]
+               
+                self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
+
+
+                self.poses, self.pts3d = center_poses(self.poses, self.pts3d, self.opt.enable_cam_center)
+
+
+                if self.scale == -1:
+                    self.scale = 1 / np.linalg.norm(self.poses[:, :3, 3], axis=-1).max()
+                    print(f'[INFO] ColmapDataset: auto-scale {self.scale:.4f}')
+
+                self.poses[:, :3, 3] *= self.scale
+
+                self.pts3d *= self.scale
+
+                # use pts3d to estimate aabb
+                # self.pts_aabb = np.concatenate([np.percentile(self.pts3d, 1, axis=0), np.percentile(self.pts3d, 99, axis=0)]) # [6]
+                self.pts_aabb = np.concatenate([np.min(self.poses[:, :3, 3], axis=0), np.max(self.poses[:, :3, 3], axis=0)]) # [6]
+
+                if np.abs(self.pts_aabb).max() > self.opt.bound:
+                    print(f'[WARN] ColmapDataset: estimated AABB {self.pts_aabb.tolist()} exceeds provided bound {self.opt.bound}! Consider improving --bound to make scene included in trainable region.')
+
+
+                feature_folder = os.path.join(self.root_path, 'sam_features')
+                feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+                
+                exist_mask = np.array([os.path.exists(f) for f in img_paths])
+                print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
+                img_paths = img_paths[exist_mask]
+                feature_paths = feature_paths[exist_mask]
+                self.poses = self.poses[exist_mask]
+                self.intrinsics= self.intrinsics[exist_mask]
+            elif self.opt.data_type == 'pano':
+                                   
+                img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
+                if not os.path.exists(img_folder):
+                    img_folder = os.path.join(self.root_path, "images")
+
+                img_names = os.listdir(img_folder)
+                img_names.sort()
+                self.img_names = img_names
+                
+                img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
+                poses = []
+                intrinsics = []
+
+                self.H, self.W = cv2.imread(img_paths[0]).shape[:2]             
+                pose_root = os.path.join(self.root_path, 'pose')
+                
+                intri_file = os.path.join(self.root_path, 'intrinsic', 'intrinsic_color.txt')
+                global_intr = np.array([[float(y.strip()) for y in x.strip().split()] for x in Path(intri_file).read_text().splitlines() if x != ''])
+                global_intr = np.array([global_intr[0,0], global_intr[1,1], global_intr[0,-2], global_intr[1,-2]], dtype=np.float32)
+                # global_intr = np.array([meta['camera']['focal_length'], meta['camera']['focal_length'], global_intr[0,-1], global_intr[1,-1]])
+
+
+                
+                for name in img_names:
+                    pose_name = os.path.join(pose_root, name[:-3] + 'txt')
+                    pose = np.array([[float(y.strip()) for y in x.strip().split()] for x in Path(pose_name).read_text().splitlines() if x != ''])
+                    # pose = nerf_matrix_to_ngp(np.array(pose,  dtype=np.float32), scale=1)
+                    pose[:, 1:3] = -pose[:, 1:3] 
+                    poses.append(pose)
+                    intrinsics.append(global_intr)
+                self.poses  = np.stack(poses, axis=0)
+
+
+                self.pts3d = self.poses[:, :3, 3]
+               
+         
+                self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
+                self.poses, self.pts3d = center_poses(self.poses, self.pts3d, self.opt.enable_cam_center)
+
+
+                if self.scale == -1:
+                    self.scale = 1 / np.linalg.norm(self.poses[:, :3, 3], axis=-1).max()
+                    print(f'[INFO] ColmapDataset: auto-scale {self.scale:.4f}')
+
+                self.poses[:, :3, 3] *= self.scale
+
+                self.pts3d *= self.scale
+
+                # use pts3d to estimate aabb
+                # self.pts_aabb = np.concatenate([np.percentile(self.pts3d, 1, axis=0), np.percentile(self.pts3d, 99, axis=0)]) # [6]
+                self.pts_aabb = np.concatenate([np.min(self.poses[:, :3, 3], axis=0), np.max(self.poses[:, :3, 3], axis=0)]) # [6]
+
+                if np.abs(self.pts_aabb).max() > self.opt.bound:
+                    print(f'[WARN] ColmapDataset: estimated AABB {self.pts_aabb.tolist()} exceeds provided bound {self.opt.bound}! Consider improving --bound to make scene included in trainable region.')
+
+                # self.poses = self.poses[:, [1, 0, 2, 3], :]
+                # self.cam_near_far = torch.from_numpy(np.stack(cam_near_far))
+                
+                feature_folder = os.path.join(self.root_path, 'sam_features')
+                feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+                
+                exist_mask = np.array([os.path.exists(f) for f in img_paths])
+                print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
+                img_paths = img_paths[exist_mask]
+                feature_paths = feature_paths[exist_mask]
+                self.poses = self.poses[exist_mask]
+                self.intrinsics= self.intrinsics[exist_mask]  
+                
+        else:
+            self.colmap_path = None
+            candidate_paths = [
+                os.path.join(self.root_path, "colmap_sparse", "0"),
+                os.path.join(self.root_path, "sparse", "0"),
+                os.path.join(self.root_path, "colmap"),
+            ]
+            for path in candidate_paths:
+                if os.path.exists(path):
+                    self.colmap_path = path
+                    break
+                
+            if self.colmap_path == None:
+                raise ValueError(f"Cannot find colmap sparse output under {self.root_path}, please run colmap first!")
+
+            camdata = read_cameras_binary(os.path.join(self.colmap_path, 'cameras.bin'))
+            
+            # read image size (assume all images are of the same shape!)
+            self.H = int(round(camdata[1].height / self.downscale))
+            self.W = int(round(camdata[1].width / self.downscale))
+            print(f'[INFO] ColmapDataset: image H = {self.H}, W = {self.W}')
+
+            # read image paths
+            imdata = read_images_binary(os.path.join(self.colmap_path, "images.bin"))
+            imkeys = np.array(sorted(imdata.keys()))
+
+
+            img_names = [os.path.basename(imdata[k].name) for k in imkeys]
+            self.img_names = np.array(img_names)
+
+
+            img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
+            if not os.path.exists(img_folder):
+                img_folder = os.path.join(self.root_path, "images")
+            img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
+            
+            
+            if self.opt.with_mask:
+                mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+                mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
 
             
-        # read image size (assume all images are of the same shape!)
-        self.H = int(round(camdata[1].height / self.downscale))
-        self.W = int(round(camdata[1].width / self.downscale))
-        print(f'[INFO] ColmapDataset: image H = {self.H}, W = {self.W}')
 
-        # read image paths
-        imdata = read_images_binary(os.path.join(self.colmap_path, "images.bin"))
-        imkeys = np.array(sorted(imdata.keys()))
+            feature_folder = os.path.join(self.root_path, 'sam_features')
+            feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+
+            # only keep existing images
+            exist_mask = np.array([os.path.exists(f) for f in img_paths])
+            print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
+            imkeys = imkeys[exist_mask]
+            img_paths = img_paths[exist_mask]
+            feature_paths = feature_paths[exist_mask]
+
+            # read intrinsics
+            intrinsics = []
+            for k in imkeys:
+                cam = camdata[imdata[k].camera_id]
+                if cam.model in ['SIMPLE_RADIAL', 'SIMPLE_PINHOLE']:
+                    fl_x = fl_y = cam.params[0] / self.downscale
+                    cx = cam.params[1] / self.downscale
+                    cy = cam.params[2] / self.downscale
+                elif cam.model in ['PINHOLE', 'OPENCV']:
+                    fl_x = cam.params[0] / self.downscale
+                    fl_y = cam.params[1] / self.downscale
+                    cx = cam.params[2] / self.downscale
+                    cy = cam.params[3] / self.downscale
+                else:
+                    raise ValueError(f"Unsupported colmap camera model: {cam.model}")
+                intrinsics.append(np.array([fl_x, fl_y, cx, cy], dtype=np.float32))
+            
+            self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
+
+            # read poses
+            poses = []
+            for k in imkeys:
+                
+                P = np.eye(4, dtype=np.float64)
+                P[:3, :3] = imdata[k].qvec2rotmat()
+                P[:3, 3] = imdata[k].tvec
+                poses.append(P)
+
+            
+            poses = np.linalg.inv(np.stack(poses, axis=0)) # [N, 4, 4]
+
+            # read sparse points
+            ptsdata = read_points3d_binary(os.path.join(self.colmap_path, "points3D.bin"))
+            ptskeys = np.array(sorted(ptsdata.keys()))
+            pts3d = np.array([ptsdata[k].xyz for k in ptskeys]) # [M, 3]
+            self.ptserr = np.array([ptsdata[k].error for k in ptskeys]) # [M]
+            self.mean_ptserr = np.mean(self.ptserr)
+            
+            self.poses = poses
+            # # center pose
+            self.poses, self.pts3d = center_poses(poses, pts3d, self.opt.enable_cam_center)
+            print(f'[INFO] ColmapDataset: load poses {self.poses.shape}, points {self.pts3d.shape}')
+
+            # rectify convention...
+            self.poses[:, :3, 1:3] *= -1
+            self.poses = self.poses[:, [1, 0, 2, 3], :]
+            self.poses[:, 2] *= -1
 
 
-        img_names = [os.path.basename(imdata[k].name) for k in imkeys]
-        self.img_names = np.array(img_names)
 
+            # print(np.linalg.inv((nerf_matrix_to_ngp(temp))))
+            self.pts3d = self.pts3d[:, [1, 0, 2]]
+            self.pts3d[:, 2] *= -1
 
-        img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
-        if not os.path.exists(img_folder):
-            img_folder = os.path.join(self.root_path, "images")
-        img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
-        
-        
-        if self.opt.with_mask:
-            mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-            mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
+            # auto-scale
+            if self.scale == -1:
+                self.scale = 1 / np.linalg.norm(self.poses[:, :3, 3], axis=-1).max()
+                print(f'[INFO] ColmapDataset: auto-scale {self.scale:.4f}')
 
-        
+            self.poses[:, :3, 3] *= self.scale
+            self.pts3d *= self.scale
+            
+            
+            self.cam_near_far = []
+            
+            # use pts3d to estimate aabb
+            # self.pts_aabb = np.concatenate([np.percentile(self.pts3d, 1, axis=0), np.percentile(self.pts3d, 99, axis=0)]) # [6]
+            self.pts_aabb = np.concatenate([np.min(self.pts3d, axis=0), np.max(self.pts3d, axis=0)]) # [6]
+            if np.abs(self.pts_aabb).max() > self.opt.bound:
+                print(f'[WARN] ColmapDataset: estimated AABB {self.pts_aabb.tolist()} exceeds provided bound {self.opt.bound}! Consider improving --bound to make scene included in trainable region.')
 
-        feature_folder = os.path.join(self.root_path, 'sam_features')
-        feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
+            # process pts3d into sparse depth data.
 
-        # only keep existing images
-        exist_mask = np.array([os.path.exists(f) for f in img_paths])
-        print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
-        imkeys = imkeys[exist_mask]
-        img_paths = img_paths[exist_mask]
-        feature_paths = feature_paths[exist_mask]
-
-        # read intrinsics
-        intrinsics = []
-        for k in imkeys:
-            cam = camdata[imdata[k].camera_id]
-            if cam.model in ['SIMPLE_RADIAL', 'SIMPLE_PINHOLE']:
-                fl_x = fl_y = cam.params[0] / self.downscale
-                cx = cam.params[1] / self.downscale
-                cy = cam.params[2] / self.downscale
-            elif cam.model in ['PINHOLE', 'OPENCV']:
-                fl_x = cam.params[0] / self.downscale
-                fl_y = cam.params[1] / self.downscale
-                cx = cam.params[2] / self.downscale
-                cy = cam.params[3] / self.downscale
-            else:
-                raise ValueError(f"Unsupported colmap camera model: {cam.model}")
-            intrinsics.append(np.array([fl_x, fl_y, cx, cy], dtype=np.float32))
-        
-        self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
-
-        # read poses
-        poses = []
-        for k in imkeys:
-            P = np.eye(4, dtype=np.float64)
-            P[:3, :3] = imdata[k].qvec2rotmat()
-            P[:3, 3] = imdata[k].tvec
-            poses.append(P)
-        
-        poses = np.linalg.inv(np.stack(poses, axis=0)) # [N, 4, 4]
-        
-
-        # read sparse points
-        ptsdata = read_points3d_binary(os.path.join(self.colmap_path, "points3D.bin"))
-        ptskeys = np.array(sorted(ptsdata.keys()))
-        pts3d = np.array([ptsdata[k].xyz for k in ptskeys]) # [M, 3]
-        self.ptserr = np.array([ptsdata[k].error for k in ptskeys]) # [M]
-        self.mean_ptserr = np.mean(self.ptserr)
-
-        # center pose
-        self.poses, self.pts3d = center_poses(poses, pts3d, self.opt.enable_cam_center)
-        print(f'[INFO] ColmapDataset: load poses {self.poses.shape}, points {self.pts3d.shape}')
-
-        # rectify convention...
-        self.poses[:, :3, 1:3] *= -1
-        self.poses = self.poses[:, [1, 0, 2, 3], :]
-        self.poses[:, 2] *= -1
-
-        self.pts3d = self.pts3d[:, [1, 0, 2]]
-        self.pts3d[:, 2] *= -1
-
-        # auto-scale
-        if self.scale == -1:
-            self.scale = 1 / np.linalg.norm(self.poses[:, :3, 3], axis=-1).max()
-            print(f'[INFO] ColmapDataset: auto-scale {self.scale:.4f}')
-
-        self.poses[:, :3, 3] *= self.scale
-        self.pts3d *= self.scale
-
-        # use pts3d to estimate aabb
-        # self.pts_aabb = np.concatenate([np.percentile(self.pts3d, 1, axis=0), np.percentile(self.pts3d, 99, axis=0)]) # [6]
-        self.pts_aabb = np.concatenate([np.min(self.pts3d, axis=0), np.max(self.pts3d, axis=0)]) # [6]
-        if np.abs(self.pts_aabb).max() > self.opt.bound:
-            print(f'[WARN] ColmapDataset: estimated AABB {self.pts_aabb.tolist()} exceeds provided bound {self.opt.bound}! Consider improving --bound to make scene included in trainable region.')
-
-        # process pts3d into sparse depth data.
-
-        if self.type != 'test':
+        if self.type != 'test' and self.opt.data_type == 'mip':
         
             self.cam_near_far = [] # always extract this infomation
             
@@ -276,7 +589,7 @@ class ColmapDataset:
                 depth = (P[:3, 3] - pts) @ P[:3, 2]
 
                 # calc weight
-                weight = 2 * np.exp(- (err / self.mean_ptserr) ** 2)
+                # weight = 2 * np.exp(- (err / self.mean_ptserr) ** 2)
 
                 _mean_valid_sparse_depth += depth.shape[0]
 
@@ -344,20 +657,29 @@ class ColmapDataset:
                         pose[:3, 3] = (1 - ratio) * pose0[:3, 3] + ratio * pose1[:3, 3]
                         poses.append(pose)
                     pose0 = pose1
-
                 self.poses = np.stack(poses, axis=0)
 
             # fix intrinsics for test case
             self.intrinsics = self.intrinsics[[0]].repeat(self.poses.shape[0], 1)
 
             self.images = None
+            self.masks = None
+            self.gt_incoherent_masks = None
+            self.error_map = None
         
         else:
             all_ids = np.arange(len(img_paths))
-            val_ids = all_ids[::16]
-            if self.opt.val_all:
-                val_ids = all_ids
+            
+            with open(os.path.join(self.root_path, 'data_split.json')) as f:
+                data_split = json.load(f)
+            # train_ids = [id for id in all_ids if self.img_names[id] in data_split['train']]
 
+            if self.opt.val_type == 'default':
+                val_ids = all_ids[::32]
+            elif self.opt.val_type == 'val_all':
+                val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
+            
+            # val_ids = all_ids[::16]
             if self.type == 'train':
                 train_ids = np.array([i for i in all_ids if i not in val_ids])
                 self.poses = self.poses[train_ids]
@@ -379,7 +701,24 @@ class ColmapDataset:
                     self.img_names = self.img_names[val_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[val_ids]
-            # else: trainval use all.
+            # elif self.type == 'test':
+            #     for idx in range(20):
+                    
+            #         f0, f1 = np.random.choice(frames, 2, replace=False)
+                    # pose0 = nerf_matrix_to_ngp(np.array(f0['transform_matrix'], dtype=np.float32), scale=self.scale, offset=self.offset) # [4, 4]
+                    # pose1 = nerf_matrix_to_ngp(np.array(f1['transform_matrix'], dtype=np.float32), scale=self.scale, offset=self.offset) # [4, 4]
+                    # rots = Rotation.from_matrix(np.stack([pose0[:3, :3], pose1[:3, :3]]))
+                    # slerp = Slerp([0, 1], rots)
+
+                    # self.poses = []
+                    # self.images = None
+                    # for i in range(n_test + 1):
+                    #     ratio = np.sin(((i / n_test) - 0.5) * np.pi) * 0.5 + 0.5
+                    #     pose = np.eye(4, dtype=np.float32)
+                    #     pose[:3, :3] = slerp(ratio).as_matrix()
+                    #     pose[:3, 3] = (1 - ratio) * pose0[:3, 3] + ratio * pose1[:3, 3]
+                    #     self.poses.append(pose)
+                    # else: trainval use all.
             
             # read images
 
@@ -400,7 +739,7 @@ class ColmapDataset:
                 self.images = None
                 
             def validate_file(file_name):
-                file_id = int(file_name[-15:-10])
+                # file_id = int(file_name[-15:-10])
                 # return_value = file_id <= 30 or (file_id >=53 and file_id <=54 ) or (file_id >= 122 and file_id <=135) or \
                 #                 (file_id >= 171 and file_id <= 177)
                                  
@@ -419,7 +758,11 @@ class ColmapDataset:
                     f = mask_paths[idx]
                     
                     f = f.replace('.jpg', '_masks.npy').replace('.JPG', '_masks.npy').replace('.png', '_masks.npy').replace('.PNG', '_masks.npy')
-                    mask = torch.from_numpy(np.load(f))
+                    if os.path.isfile(f):
+                        print(f)
+                        mask = torch.from_numpy(np.load(f))
+                    else:
+                        mask = torch.zeros([512, 512])
                     
                     
                     # mask_list = ['DSC07956', 'DSC07957', 'DSC07958', 'DSC07959', 'DSC07960', 'DSC07961', 'DSC07963',
@@ -427,16 +770,21 @@ class ColmapDataset:
                     #              'DSC07985', 'DSC07987',
                     #              'DSC08029', 'DSC08032', 'DSC08033', 'DSC08034', 'DSC08035'
                     #              ]
+                    # print(valid_dict)
+                    # exit()
                     if self.training:
 
                         if mask.sum()>=10 and validate_file(f) and valid_dict[self.img_names[idx][:-4]]:
                             self.valid_mask_index_list.append(idx)
+                            
                         # if self.img_names[idx][:-4] in mask_list:
                         #     self.valid_mask_index_list.append(idx)    
 
                 
                     self.masks.append(mask.to(int))
                 self.masks = torch.stack(self.masks, axis=0)
+                if len(self.masks.shape) != 4:
+                    self.masks = self.masks[..., None]
 
                 
                 self.origin_H, self.origin_W = self.masks.shape[1], self.masks.shape[2]
@@ -450,8 +798,7 @@ class ColmapDataset:
                 
                 if self.training:
                     self.valid_mask_index_list = np.array(self.valid_mask_index_list)
-                    
-                    self.valid_mask_index_list = self.valid_mask_index_list[::2]
+                    # self.valid_mask_index_list = self.valid_mask_index_list[::5]
                     sample_num = len(self.valid_mask_index_list)
                     if sample_num < 20:
                         add_sample = np.random.choice(self.valid_mask_index_list, 20 - sample_num)
@@ -461,6 +808,9 @@ class ColmapDataset:
                 
                     self.poses = self.poses[self.valid_mask_index]
                     self.masks = self.masks[self.valid_mask_index]
+                    # for m in range(self.masks.shape[0]):
+                    #     print(self.masks[m].sum())
+                    # exit()
                     self.confident_masks = self.masks.clone()
                     self.img_names = [self.img_names[idx] for idx in self.valid_mask_index_list]
                     if self.gt_incoherent_masks is not None:
@@ -471,6 +821,8 @@ class ColmapDataset:
                     # exit()
                     if self.opt.error_map:
                         self.error_map = torch.ones([self.masks.shape[0], self.opt.error_map_size * self.opt.error_map_size], dtype=torch.float) # [B, 128 * 128], flattened for easy indexing, fixed resolution...
+                    else:
+                        self.error_map = None
                 else:
                     self.error_map = None
                 # self.valid_mask_index = []
@@ -490,11 +842,11 @@ class ColmapDataset:
 
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
         
-        if self.opt.val_all:
+        if self.opt.val_type == 'val_all' and self.type == 'test':
             pose_dict = {}
             for i in range(len(self.img_names)):
                 pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
-            with open(os.path.join(self.opt.workspace, 'pose_dir.json'), "w+") as f:
+            with open(os.path.join(self.opt.workspace, 'validation' 'pose_dir.json'), "w+") as f:
                 json.dump(pose_dict, f, indent=4)
 
 
@@ -564,12 +916,10 @@ class ColmapDataset:
         
 
         if self.training and self.opt.use_multi_res and self.global_step > self.opt.rgb_similarity_iter:
-            
             multi_res_step = self.global_step - self.opt.rgb_similarity_iter
             if (multi_res_step - 1 % self.opt.multi_res_update_iter) == 0:
                 downsample_level = multi_res_step // self.opt.multi_res_update_iter
                 downsample_scale = pow(2, max(0, self.opt.max_multi_res_level - downsample_level))
-            
             
                 self.H, self.W = self.origin_H // downsample_scale, self.origin_W // downsample_scale
                 if self.masks is not None:
@@ -590,8 +940,9 @@ class ColmapDataset:
                 self.opt.num_local_sample = (self.origin_num_local_sample // downsample_scale) // downsample_scale
                 self.opt.local_sample_patch_size = self.origin_local_sample_patch_size // downsample_scale
 
-        if self.training and self.global_step > self.opt.rgb_similarity_iter:
+        if self.training and (self.global_step > self.opt.rgb_similarity_iter or self.global_step / len(self.poses) > 5):
             self.opt.random_image_batch = True
+            
         if self.training and not self.opt.with_sam:
             num_rays = self.opt.num_rays
             if self.opt.random_image_batch:
@@ -824,3 +1175,9 @@ class ColmapDataset:
         loader._data = self # an ugly fix... we need to access error_map & poses in trainer.
         loader.has_gt = self.images is not None
         return loader
+    def save_poses(self, root):
+        pose_dict = {}
+        for i in range(len(self.img_names)):
+            pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
+        with open(os.path.join(self.opt.workspace, 'pose_dir.json'), "w+") as f:
+            json.dump(pose_dict, f, indent=4)

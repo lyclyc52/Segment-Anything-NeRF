@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=2
 python main.py /ssddata/yliugu/data/shoe_rack \
 --workspace trial_model/trial_shoe_rack_sam \
 --enable_cam_center \

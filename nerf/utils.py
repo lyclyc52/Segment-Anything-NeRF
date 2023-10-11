@@ -7,6 +7,7 @@ import random
 import warnings
 import tensorboardX
 import wandb
+import json
 
 import numpy as np
 
@@ -544,7 +545,7 @@ class Trainer(object):
                  use_loss_as_metric=True,  # use loss as the first metric
                  report_metric_at_train=False,  # also report metrics at training
                  use_checkpoint="latest",  # which ckpt to use at init time
-                 use_tensorboardX=True,  # whether to use tensorboard for logging
+                 use_tensorboardX=False,  # whether to use tensorboard for logging
                  # whether to call scheduler.step() after every train step
                  scheduler_update_every_step=False,
                  sam_predictor=None,
@@ -591,7 +592,7 @@ class Trainer(object):
         self.criterion = criterion
 
         self.color_map = np.multiply([
-            plt.cm.get_cmap('gist_ncar', 41)((i * 7 + 5) % 41)[:3] for i in range(41)
+            plt.cm.get_cmap('gist_ncar', 100)((i * 7 + 5) % 100)[:3] for i in range(100)
         ], 1)
         self.color_map = torch.from_numpy(
             self.color_map).to(self.device).to(torch.float)
@@ -946,17 +947,17 @@ class Trainer(object):
                 
                 inst_masks = torch.softmax(
                     inst_masks, dim=-1)  # [B, N, num_instances + k]
-                pred_masks = torch.stack([inst_masks[..., :-1].sum(-1), inst_masks[..., -1]], -1)
-                
-                pred_masks_flattened = pred_masks.view(-1, 2)
+                # pred_masks = torch.stack([inst_masks[..., :-1].sum(-1), inst_masks[..., -1]], -1)
+                pred_masks = inst_masks
+                pred_masks_flattened = pred_masks.view(-1, self.opt.n_inst)
                 pred_masks_flattened = torch.clamp(pred_masks_flattened, min=self.opt.epsilon, max=1-self.opt.epsilon)
- 
+                global_pred_masks_flattened = pred_masks_flattened[:self.opt.num_rays]
+                global_gt_masks_flattened = gt_masks_flattened[:self.opt.num_rays]
                 if labeled.sum() > 0:
                     # [B*N], loss fn with reduction='none'
-                    gt_loss_pred_masks_flattened = pred_masks_flattened[:self.opt.num_rays]
-                    gt_loss_gt_masks_flattened = gt_masks_flattened[:self.opt.num_rays]
-                    loss = -torch.log(torch.gather(gt_loss_pred_masks_flattened, -1, gt_loss_gt_masks_flattened[..., None]))
-                    
+
+                    # loss = -torch.log(torch.gather(pred_masks_flattened, -1, gt_masks_flattened[..., None]))
+                    loss = -torch.log(torch.gather(global_pred_masks_flattened, -1, global_gt_masks_flattened[..., None]))
                 else:
                     loss = torch.tensor(0).to(
                         pred_masks_flattened.dtype).to(self.device)
@@ -969,6 +970,7 @@ class Trainer(object):
                     
                     index = data['index'] # [B]
                     inds = data['inds_coarse']# [B]
+     
                     global_inst_masks = inst_masks[:self.opt.num_rays]
                     if isinstance(index, list):
                         
@@ -976,8 +978,8 @@ class Trainer(object):
                         # take out, this is an advanced indexing and the copy is unavoidable.
                         error_map = self.error_map[index] # [B, H * W]
 
-                        sample_mask_gt = torch.zeros_like(gt_loss_pred_masks_flattened, device=gt_loss_pred_masks_flattened.device)
-                        sample_mask_gt= sample_mask_gt.scatter_(-1, gt_loss_gt_masks_flattened[..., None], 1)
+                        sample_mask_gt = torch.zeros_like(global_pred_masks_flattened, device=global_pred_masks_flattened.device)
+                        sample_mask_gt= sample_mask_gt.scatter_(-1, global_gt_masks_flattened[..., None], 1)
                         
                         pred_masks_similarity = F.cosine_similarity(global_inst_masks, sample_mask_gt, dim=-1)
                         error = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
@@ -992,8 +994,8 @@ class Trainer(object):
                         
                         
                     else:
-                        sample_mask_gt = torch.zeros_like(gt_loss_pred_masks_flattened, device=gt_loss_pred_masks_flattened.device)
-                        sample_mask_gt= sample_mask_gt.scatter_(-1, gt_loss_gt_masks_flattened[..., None], 1)
+                        sample_mask_gt = torch.zeros_like(global_pred_masks_flattened, device=global_pred_masks_flattened.device)
+                        sample_mask_gt= sample_mask_gt.scatter_(-1, global_gt_masks_flattened[..., None], 1)
                         
                         pred_masks_similarity = F.cosine_similarity(global_inst_masks, sample_mask_gt, dim=-1)
                         error = torch.exp(- self.opt.rgb_similarity_exp_weight * pred_masks_similarity - self.opt.epsilon) 
@@ -1005,7 +1007,7 @@ class Trainer(object):
                     
 
                     
-                    np.save(f'./debug/error_{self.epoch}.npy', self.error_map.detach().cpu().numpy())
+                    # np.save(f'./debug/error_{self.epoch}.npy', self.error_map.detach().cpu().numpy())
                     # put back
                     # self.error_map[index] = error_map
                 loss = loss.mean()
@@ -1143,16 +1145,16 @@ class Trainer(object):
 
                 labeled = gt_mask_flattened != -1  # only compute loss for labeled pixels
                 
-                inst_mask = outputs['instance_mask_logits'].reshape(
-                H, W, self.opt.n_inst + self.opt.redundant_instance)
+                inst_mask = outputs['instance_mask_logits'].reshape(H, W, self.opt.n_inst + self.opt.redundant_instance)
             
                 if self.opt.n_inst > 1:
                     inst_mask = torch.softmax(inst_mask, dim=-1)                
-                    pred_mask = torch.stack([inst_mask[..., :-1].sum(-1), inst_mask[..., -1]], -1)
+                    # pred_mask = torch.stack([inst_mask[..., :-1].sum(-1), inst_mask[..., -1]], -1)
+                    pred_mask = inst_mask
                 else:
                     pred_mask = torch.sigmoid(inst_mask)
 
-                pred_mask_flattened = pred_mask.view(-1, 2)
+                pred_mask_flattened = pred_mask.view(-1, self.opt.n_inst)
  
                 pred_mask_flattened = torch.clamp(pred_mask_flattened, min=self.opt.epsilon, max=1-self.opt.epsilon)
  
@@ -1247,7 +1249,8 @@ class Trainer(object):
             
             if self.opt.n_inst > 1:
                 inst_mask = torch.softmax(inst_mask, dim=-1)                
-                pred_mask = torch.stack([inst_mask[..., :-1].sum(-1), inst_mask[..., -1]], -1)
+                # pred_mask = torch.stack([inst_mask[..., :-1].sum(-1), inst_mask[..., -1]], -1)
+                pred_mask = inst_mask
             else:
                 pred_mask = torch.sigmoid(inst_mask)
 
@@ -1328,8 +1331,13 @@ class Trainer(object):
             # get remembered points coords first
             inputs_point_coords = None
             if self.point_3d is not None:
+                print('3d points:')
                 print(self.point_3d)
-                print()
+                # print('camera pose:')
+                # print(data['poses'])
+                # print('cam_near_far:')
+                # print(cam_near_far)
+                # print()
                 point_3d = torch.cat([self.point_3d, torch.ones_like(
                     self.point_3d[:, :1])], axis=-1)  # [N, 4]
                 w2c = torch.inverse(data['poses'][0])  # [4, 4]
@@ -1366,8 +1374,13 @@ class Trainer(object):
 
                 pred_rgb = overlay_mask(pred_rgb, masks[0])
                 pred_rgb = overlay_point(pred_rgb, outputs_point_coords)
-
-        return pred_rgb, pred_depth
+        if self.opt.return_extra:
+            if self.opt.with_sam:
+                return pred_rgb, pred_depth, pred_samvit
+            elif self.opt.with_mask:
+                return pred_rgb, pred_depth, pred_mask
+        else:
+            return pred_rgb, pred_depth
 
     def sam_predict(self, H, W, features, point_coords=None, mask_input=None, image=None):
         # H/W: original image size
@@ -1456,7 +1469,7 @@ class Trainer(object):
             self.train_one_epoch(train_loader)
             self.save_interval = 1
             if (self.epoch % self.save_interval == 0 or self.epoch == max_epochs) and self.workspace is not None and self.local_rank == 0:
-                self.save_checkpoint(full=True, best=False, remove_old=False)
+                self.save_checkpoint(full=True, best=False, remove_old=True)
 
             if self.epoch % self.eval_interval == 0:
                 self.evaluate_one_epoch(valid_loader)
@@ -1495,18 +1508,21 @@ class Trainer(object):
             all_preds_depth = []
 
         with torch.no_grad():
-
+            pose_dict = {}
             for i, data in enumerate(loader):
 
                 with torch.cuda.amp.autocast(enabled=self.opt.fp16):
-                    preds, preds_depth = self.test_step(data)
+                    if self.opt.return_extra:
+                        preds, preds_depth, pred_extra = self.test_step(data)
+                    else:
+                        preds, preds_depth = self.test_step(data)
                 pred = preds.detach().cpu().numpy()
                 pred = (pred * 255).astype(np.uint8)
 
                 pred_depth = preds_depth.detach().cpu().numpy()
-                pred_depth = (pred_depth - pred_depth.min()) / \
-                    (pred_depth.max() - pred_depth.min() + 1e-6)
-                pred_depth = (pred_depth * 255).astype(np.uint8)
+                # pred_depth = (pred_depth - pred_depth.min()) / \
+                #     (pred_depth.max() - pred_depth.min() + 1e-6)
+                # pred_depth = (pred_depth * 255).astype(np.uint8)
 
                 if write_video:
                     all_preds.append(pred)
@@ -1514,11 +1530,17 @@ class Trainer(object):
                 else:
                     cv2.imwrite(os.path.join(save_path, f'{name}_{i:04d}_rgb.png'), cv2.cvtColor(
                         pred, cv2.COLOR_RGB2BGR))
-                    cv2.imwrite(os.path.join(
-                        save_path, f'{name}_{i:04d}_depth.png'), pred_depth)
-
+                    np.save(os.path.join(
+                        save_path, f'{name}_{i:04d}_depth.npy'), pred_depth)
+                    if self.opt.return_extra:
+                        pred_extra = pred_extra.detach().cpu().numpy()
+                        ending = 'sam' if self.opt.with_sam else 'mask'
+                        np.save(os.path.join(save_path, f'{name}_{i:04d}_{ending}.npy'), pred_extra)
+                pose_dict[f'{i:04d}'] = data['poses'][0].detach().cpu().numpy().tolist()
                 pbar.update(loader.batch_size)
-
+        with open(os.path.join(save_path, 'pose_dir.json'), "w+") as f:
+            json.dump(pose_dict, f, indent=4)
+            
         if write_video:
             all_preds = np.stack(all_preds, axis=0)  # [N, H, W, 3]
             all_preds_depth = np.stack(all_preds_depth, axis=0)  # [N, H, W]

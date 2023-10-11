@@ -13,7 +13,7 @@ import json
 
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 def show_points(coords, labels, ax, marker_size=375):
     pos_points = coords[labels==1]
     neg_points = coords[labels==0]
@@ -77,7 +77,8 @@ def main(args, pts_3D, input_label):
     frame_names = []
     for k in poses.keys():
         frame_names.append(k)
-    
+    # print(frame_names)
+    # exit()
 
     H = W = 512
     fovy = 60
@@ -96,6 +97,7 @@ def main(args, pts_3D, input_label):
 
 
     rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[0]}_rgb.png')
+    
     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     predictor.set_image(image)
@@ -115,14 +117,14 @@ def main(args, pts_3D, input_label):
     
     
     
-    
     valid_count = {}
     
     for i in tqdm.tqdm(range(len(frame_names))):
 
+
         rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_rgb.png')
         depth_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_depth.npy')
-        feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_sam.npy')
+        feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}.npy')
         
         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -143,9 +145,9 @@ def main(args, pts_3D, input_label):
         
         valid =  np.logical_and.reduce((pts_2D[..., 1] < d.shape[0], pts_2D[..., 0] < d.shape[1],
             pts_2D[..., 1] >= 0, pts_2D[..., 0] >=0))
-
+        
         if valid.sum() < 1:
-            print(f"{frame_names[i]} fails")
+            # print(f"{frame_names[i]} fails")
             mask = np.zeros(d.shape)
             np.save(output_file, mask)
             
@@ -172,7 +174,7 @@ def main(args, pts_3D, input_label):
         valid = np.logical_and.reduce((pts_depth > 0., torch.abs(im_depth- pts_depth) < threshold))
         
         if valid.sum() < 1:
-            print(f"{frame_names[i]} fails")
+            # print(f"{frame_names[i]} fails")
             mask = np.zeros(d.shape)
             np.save(output_file, mask)
             
@@ -193,6 +195,7 @@ def main(args, pts_3D, input_label):
         
         if args.decode:
             if args.use_nerf_feature:
+
                 f = np.load(feature_name)[0]
                 f = downsample_sam_feature(f)
                 predictor.features = torch.from_numpy(f).to(predictor.device)[None, ...]
@@ -234,16 +237,18 @@ def main(args, pts_3D, input_label):
             # exit()
         
         crucial = False
-        for j in args.crucial_point_index:
-            if j in pts_ids:
-                crucial = True
-                break
+        if args.crucial_point_index is None:
+            crucial = True
+        else:
+            for j in args.crucial_point_index:
+                if j in pts_ids:
+                    crucial = True
+                    break
         if valid.sum() >= args.valid_threohould and crucial:
             valid_count[frame_names[i]] = 1
         else:
             valid_count[frame_names[i]] = 0
-        
-        
+
         
         
         
@@ -324,7 +329,7 @@ def main(args, pts_3D, input_label):
 #         f = np.load(feature_name)[0]
 
 
-#         pts_3D = project_to_3d(input_point, p, n, d)
+        # pts_3D = project_to_3d(input_point, p, n, d)
 #         pts_2D, pts_depth = project_to_2d(pts_3D, p, n)
         
 #         # valid = pts_2D[..., 1] < r.shape[0] and pts_2D[..., 0] < r.shape[1] and \
@@ -395,6 +400,9 @@ def project_to_3d(pts, pose, intrinsics, depth):
         intrinsics: fx, fy, cx, cy
         depth: HxW
     '''
+    pose[:,1] = -pose[:, 1]
+    pose[:,2] = -pose[:, 2]
+    
     pts = torch.from_numpy(pts)
     pose = torch.tensor(pose)
     fx, fy, cx, cy = intrinsics
@@ -451,44 +459,65 @@ def create_video():
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth')
+    # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth')
     # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
     parser.add_argument('--sam_type', type=str,
                         default='sam', choices=['sam', 'hq_sam'])
-
+    
 
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--model_type', type=str, default='vit_h')
     parser.add_argument('--threshold', type=float, default=0.05)
-    parser.add_argument('--epoch', type=str, default='0029')
-    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam')
+    parser.add_argument('--epoch', type=str, default='0040')
+    parser.add_argument('--scene_name', type=str, default='shoe_rack')
+    parser.add_argument('--scene_object', type=str, default='blue_shoes')
+    parser.add_argument('--valid_threohould', type=int, default=0)
+
+    parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model')
+    parser.add_argument('--purpose',  type=str,
+                        default='eval', choices=['train', 'eval'])
     
-    # parser.add_argument('--pose_file', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_teatime_sam/pose_dir.json')
-    # parser.add_argument('--frame_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_sam/validation')
-    
-    
-    parser.add_argument('--valid_threohould', type=int, default=4)
-    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data/Datasets/garden/table_vase_nerf')
+    parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data')
+    parser.add_argument('--output_folder_ending', type=str, default='')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     parser.add_argument('--decode', action='store_true', help='generate mask if true')
-    parser.add_argument('--crucial_point_index', type=int, nargs='*', default=[3], help="num steps sampled per ray for each proposal level")
+    parser.add_argument('--crucial_point_index', type=int, nargs='*', default=None, help="num steps sampled per ray for each proposal level")
     
-    
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
-    # parser.add_argument('--threshold', type=float, default=0.1)
+
 
     args = parser.parse_args()
     
-    
+    args.files_root = os.path.join(args.files_root, f'trial_{args.scene_name}_sam')
+    if args.purpose == 'eval':
+        args.files_root = os.path.join(args.files_root, 'results')
     args.pose_file = os.path.join(args.files_root, 'pose_dir.json')
-    args.frame_root = os.path.join(args.files_root, 'validation')
+    args.frame_root = args.files_root
     args.camera_poses = os.path.join(args.frame_root, 'camera.npz')
+    
+    
+    
+    scene_object_file = args.sam_type
+    if args.use_nerf_feature:
+        scene_object_file = 'nerf'
+    args.output_root = os.path.join(args.output_root, args.scene_name, f'{args.purpose}_{args.scene_object}_{scene_object_file}')
+    
+    if args.sam_type == 'sam':
+        args.sam_checkpoint = '/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth'
+    elif args.sam_type == 'hq_sam':
+        args.sam_checkpoint = '/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth'
+        # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth')
+    # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
+
+    
+    # load reference points:
+    with open('scene_dict.json') as scen_dict_file:
+        scene_dict = json.load(scen_dict_file)
+        pts_3D = scene_dict[args.scene_name][args.scene_object]['points']
+        pts_3D = torch.tensor(pts_3D)
+        input_label = np.ones(pts_3D.shape[0])
+        for i in scene_dict[args.scene_name][args.scene_object]['negative_labels']:
+            input_label[i] = 0
+    
     
     # # test case 0
     # pts_3D = torch.tensor([[-0.0956, -0.4185, -0.3230],
@@ -548,16 +577,18 @@ if __name__ == '__main__':
     
     
     # test case 5: garden
-    pts_3D = torch.tensor([[ 0.1554, -0.0071, -0.4008],
-                        [-0.2675,  0.1471, -0.3918],
-                        [-0.0962,  0.0480, -0.4486],
-                        [-0.0503,  0.0809, -0.6661],
-                        [-0.0384,  0.0431, -0.2802],
-                        [-0.0732,  0.0417, -0.2275]])
-    input_label = np.ones(pts_3D.shape[0])
+    # pts_3D = torch.tensor([[ 0.1554, -0.0071, -0.4008],
+    #                     [-0.2675,  0.1471, -0.3918],
+    #                     [-0.0962,  0.0480, -0.4486],
+    #                     [-0.0503,  0.0809, -0.6661],
+    #                     [-0.0384,  0.0431, -0.2802],
+    #                     [-0.0732,  0.0417, -0.2275]])
+    # input_label = np.ones(pts_3D.shape[0])
     
     # input_label[-2:] = 0
 
+    
+    
     
 
     

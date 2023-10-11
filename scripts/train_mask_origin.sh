@@ -1,15 +1,15 @@
 export CUDA_VISIBLE_DEVICES=3
 export CUDA_LAUNCH_BLOCKING=1
-python main.py /ssddata/yliugu/data/Datasets/garden \
---workspace trial_model/debug_origin_gt \
+python main.py /ssddata/yliugu/data/counter \
+--workspace trial_model/debug_gloves \
 --enable_cam_center \
 --with_mask \
---init_ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_garden_rgb/checkpoints/ngp_ep0088.pth \
+--init_ckpt /ssddata/yliugu/Segment-Anything-NeRF/trial_model/trial_counter_rgb/checkpoints/ngp_ep0067.pth \
 --data_type mip \
 --patch_size 1 \
 --num_rays 4096 \
 --iters 5000 \
---mask_folder_name table_gt \
+--mask_folder_name gloves_nerf \
 --rgb_similarity_loss_weight 0 \
 --rgb_similarity_threshold 0.1 \
 --rgb_similarity_num_sample 100 \

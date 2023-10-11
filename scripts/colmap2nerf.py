@@ -56,8 +56,8 @@ def run_ffmpeg(args):
     fps = float(args.video_fps) or 1.0
 
     print(f"running ffmpeg with input video file={video}, output image folder={images}, fps={fps}.")
-    if (input(f"warning! folder '{images}' will be deleted/replaced. continue? (Y/n)").lower().strip()+"y")[:1] != "y":
-        sys.exit(1)
+    # if (input(f"warning! folder '{images}' will be deleted/replaced. continue? (Y/n)").lower().strip()+"y")[:1] != "y":
+    #     sys.exit(1)
 
     try:
         shutil.rmtree(images)
@@ -260,6 +260,7 @@ if __name__ == "__main__":
                 qvec = np.array(tuple(map(float, elems[1:5])))
                 tvec = np.array(tuple(map(float, elems[5:8])))
                 R = qvec2rotmat(-qvec)
+                
                 t = tvec.reshape([3, 1])
                 m = np.concatenate([np.concatenate([R, t], 1), bottom], 0)
                 c2w = np.linalg.inv(m)
@@ -268,6 +269,8 @@ if __name__ == "__main__":
                 c2w[0:3, 1] *= -1
                 c2w = c2w[[1, 0, 2, 3],:] # swap y and z
                 c2w[2, :] *= -1 # flip whole world upside down
+                # if rel_name == 'images/frame_00001.jpg':
+                #     print(c2w)
 
                 up += c2w[0:3, 1]
 
@@ -288,9 +291,13 @@ if __name__ == "__main__":
     R = np.pad(R, [0, 1])
     R[-1, -1] = 1
 
-    for f in frames:
-        f["transform_matrix"] = np.matmul(R, f["transform_matrix"]) # rotate up to be the z axis
-
+    # for f in frames:
+    #     if f['file_path'] == 'images/frame_00001.jpg':
+    #         print(f["transform_matrix"])
+    #         print(R)
+    #     f["transform_matrix"] = np.matmul(R, f["transform_matrix"]) # rotate up to be the z axis
+    #     if f['file_path'] == 'images/frame_00001.jpg':
+    #         print(f["transform_matrix"])
     # find a central point they are all looking at
     print("[INFO] computing center of attention...")
     totw = 0.0
@@ -305,6 +312,7 @@ if __name__ == "__main__":
                 totw += weight
     totp /= totw
     for f in frames:
+        
         f["transform_matrix"][0:3,3] -= totp
     avglen = 0.
     for f in frames:
@@ -313,6 +321,7 @@ if __name__ == "__main__":
     print("[INFO] avg camera distance from origin", avglen)
     for f in frames:
         f["transform_matrix"][0:3,3] *= 4.0 / avglen # scale to "nerf sized"
+        
 
     # sort frames by id
     frames.sort(key=lambda d: d['file_path'])

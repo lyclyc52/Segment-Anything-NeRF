@@ -107,7 +107,7 @@ if __name__ == '__main__':
                         help="loss scale (only for non-cuda-ray mode)")
 
     # train mask options
-    parser.add_argument('--with_mask', action='store_true',
+    parser.add_argument('--with_mask', action='store_true', 
                         help="train/test with mask of some object")
     parser.add_argument('--mask_mlp_type', type=str,
                         default='default', choices=['default', 'lightweight_mask', 'adaptive'])
@@ -174,11 +174,13 @@ if __name__ == '__main__':
                         help='size of the error maps')
       
     parser.add_argument('--use_wandb', action='store_true')
+    parser.add_argument('--return_extra', action='store_true',
+                        help='return extra output')
 
     # evaluation option
     parser.add_argument('--use_point', action='store_true',
                         help='use point to generate mask')
-    parser.add_argument('--val_all', action='store_true',
+    parser.add_argument('--val_type', type=str, default='default', choices=['default', 'val_all'],
                         help='evaluate all images')
 
     # render mask options
@@ -202,7 +204,7 @@ if __name__ == '__main__':
                         help="GUI rendering max sample per pixel")
 
     parser.add_argument('--data_type', type=str, default='mip',
-                        choices=['mip', 'lerf'], help="dataset type")
+                        choices=['mip', 'lerf', 'llff', '3dfront', 'ctr', 'pano', 'lift'], help="dataset type")
     
     opt = parser.parse_args()
 
@@ -220,7 +222,7 @@ if __name__ == '__main__':
         'mip': ColmapDataset,
         'lerf': LERFDataset
     }
-    NeRFDataset = dataset_dict[opt.data_type]
+    NeRFDataset = ColmapDataset
 
     seed_everything(opt.seed)
 
