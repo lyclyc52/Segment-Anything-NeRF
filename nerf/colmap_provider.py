@@ -683,7 +683,12 @@ class ColmapDataset:
             elif self.opt.val_type == 'val_all':
                 val_ids = all_ids
             elif self.opt.val_type == 'val_split':
-                val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
+                if self.opt.with_mask:
+                    with open(os.path.join(mask_folder, 'data_split.json')) as f:
+                        data_split = json.load(f)
+                        val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
+                else:
+                    val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
             
             # val_ids = all_ids[::16]
             if self.type == 'train':
