@@ -32,8 +32,6 @@ def nerf_matrix_to_ngp(pose, scale=0.33, offset=[0, 0, 0]):
     ], dtype=np.float32)
     return new_pose
 
-
-
 def rotmat(a, b):
 	a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
 	v = np.cross(a, b)
@@ -143,9 +141,6 @@ class ColmapDataset:
             if self.opt.data_type == '3dfront':
                 with open(os.path.join(self.root_path, 'transforms.json'), 'r') as f:
                     transform = json.load(f)  
-                if self.opt.with_mask:
-                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
                 if 'room_bbox' in transform:
                     room_bbox = np.array(transform['room_bbox'])
                     self.offset = -(room_bbox[0] + room_bbox[1]) * 0.5 * self.scale
@@ -170,7 +165,7 @@ class ColmapDataset:
                     intrinsics.append(np.array([transform["fl_x"], transform["fl_y"], transform["cx"], transform["cy"]], dtype=np.float32))
                     # cam_near_far.append(np.array([0.2, 12]))
                 img_names = [os.path.basename(img) for img in img_paths]
-                self.img_names = img_names
+                self.img_names = np.array(img_names)
                 img_paths = np.array(img_paths)
                 
                 self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]
@@ -207,15 +202,15 @@ class ColmapDataset:
                 feature_paths = feature_paths[exist_mask]
                 self.poses = self.poses[exist_mask]
                 self.intrinsics= self.intrinsics[exist_mask]
-                
+                if self.opt.with_mask:
+                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
+
             elif self.opt.data_type == 'llff':
 
                 with open(os.path.join(self.root_path, 'transforms.json'), 'r') as f:
                     transform = json.load(f)
 
-                if self.opt.with_mask:
-                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
 
 
                 self.H = int(transform["h"])
@@ -238,7 +233,7 @@ class ColmapDataset:
                     intrinsics.append(np.array([transform["fl_x"], transform["fl_y"], transform["cx"], transform["cy"]], dtype=np.float32))
                     # cam_near_far.append(np.array([0.2, 12]))
                 img_names = [os.path.basename(img) for img in img_paths]
-                self.img_names = img_names
+                self.img_names = np.array(img_names)
                 img_paths = np.array(img_paths)
                 
                 self.intrinsics = torch.from_numpy(np.stack(intrinsics)) # [N, 4]               
@@ -265,6 +260,10 @@ class ColmapDataset:
                 # self.poses = self.poses[:, [1, 0, 2, 3], :]
                 # self.cam_near_far = torch.from_numpy(np.stack(cam_near_far))
                 
+                if self.opt.with_mask:
+                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
+
                 feature_folder = os.path.join(self.root_path, 'sam_features')
                 feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
                 
@@ -283,7 +282,7 @@ class ColmapDataset:
 
                 img_names = os.listdir(img_folder)
                 img_names.sort()
-                self.img_names = img_names
+                self.img_names = np.array(img_names)
                 img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
                 poses = []
                 intrinsics = []
@@ -355,6 +354,11 @@ class ColmapDataset:
                 feature_folder = os.path.join(self.root_path, 'sam_features')
                 feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
                 
+                
+                if self.opt.with_mask:
+                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
+
                 exist_mask = np.array([os.path.exists(f) for f in img_paths])
                 print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
                 img_paths = img_paths[exist_mask]
@@ -369,7 +373,7 @@ class ColmapDataset:
 
                 img_names = os.listdir(img_folder)
                 img_names.sort()
-                self.img_names = img_names
+                self.img_names = np.array(img_names)
                 
                 img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
                 poses = []
@@ -675,8 +679,10 @@ class ColmapDataset:
             # train_ids = [id for id in all_ids if self.img_names[id] in data_split['train']]
 
             if self.opt.val_type == 'default':
-                val_ids = all_ids[::32]
+                val_ids = all_ids[::16]
             elif self.opt.val_type == 'val_all':
+                val_ids = all_ids
+            elif self.opt.val_type == 'val_split':
                 val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
             
             # val_ids = all_ids[::16]
@@ -756,10 +762,8 @@ class ColmapDataset:
                     
                 for idx in tqdm.tqdm(range(len(mask_paths)), desc=f'Loading {self.type} mask'):
                     f = mask_paths[idx]
-                    
                     f = f.replace('.jpg', '_masks.npy').replace('.JPG', '_masks.npy').replace('.png', '_masks.npy').replace('.PNG', '_masks.npy')
                     if os.path.isfile(f):
-                        print(f)
                         mask = torch.from_numpy(np.load(f))
                     else:
                         mask = torch.zeros([512, 512])
@@ -773,7 +777,6 @@ class ColmapDataset:
                     # print(valid_dict)
                     # exit()
                     if self.training:
-
                         if mask.sum()>=10 and validate_file(f) and valid_dict[self.img_names[idx][:-4]]:
                             self.valid_mask_index_list.append(idx)
                             
@@ -797,13 +800,14 @@ class ColmapDataset:
                     self.gt_incoherent_masks = None
                 
                 if self.training:
-                    self.valid_mask_index_list = np.array(self.valid_mask_index_list)
-                    # self.valid_mask_index_list = self.valid_mask_index_list[::5]
+                    old_valid_mask_index_list = np.array(self.valid_mask_index_list)
+                    self.valid_mask_index_list = old_valid_mask_index_list[::5]
                     sample_num = len(self.valid_mask_index_list)
-                    if sample_num < 20:
-                        add_sample = np.random.choice(self.valid_mask_index_list, 20 - sample_num)
+                    if sample_num < 25 and self.type != 'llff':
+                        add_sample = np.random.choice(self.valid_mask_index_list, 25 - sample_num)
                         self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
-        
+                    
+                        
                     self.valid_mask_index = torch.tensor(self.valid_mask_index_list).to(torch.int)
                 
                     self.poses = self.poses[self.valid_mask_index]
@@ -842,11 +846,11 @@ class ColmapDataset:
 
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
         
-        if self.opt.val_type == 'val_all' and self.type == 'test':
+        if self.opt.val_type == 'val_all' and self.type == 'val':
             pose_dict = {}
             for i in range(len(self.img_names)):
                 pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
-            with open(os.path.join(self.opt.workspace, 'validation' 'pose_dir.json'), "w+") as f:
+            with open(os.path.join(self.opt.workspace, 'validation', 'pose_dir.json'), "w+") as f:
                 json.dump(pose_dict, f, indent=4)
 
 
@@ -935,13 +939,15 @@ class ColmapDataset:
                     self.error_map = self.error_map[:, 0, ...]
                     self.opt.error_map_size = self.H
                     self.error_map = self.error_map.view(-1, self.opt.error_map_size * self.opt.error_map_size)
-                    
-                    
+
                 self.opt.num_local_sample = (self.origin_num_local_sample // downsample_scale) // downsample_scale
                 self.opt.local_sample_patch_size = self.origin_local_sample_patch_size // downsample_scale
 
-        if self.training and (self.global_step > self.opt.rgb_similarity_iter or self.global_step / len(self.poses) > 5):
+
+        # Enable random sampling after a few epoch
+        if self.training and (self.global_step > self.opt.rgb_similarity_iter or self.global_step / len(self.poses) > 3):
             self.opt.random_image_batch = True
+            
             
         if self.training and not self.opt.with_sam:
             num_rays = self.opt.num_rays
@@ -955,7 +961,6 @@ class ColmapDataset:
                     random_sample = True
         
 
-        
 
         H, W = self.H, self.W
 
@@ -981,7 +986,6 @@ class ColmapDataset:
 
         
         if self.opt.with_mask:
-            
             # H = W = self.opt.online_resolution 
             fovy = 60
             focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
@@ -1002,7 +1006,7 @@ class ColmapDataset:
         
         error_map = None if self.error_map is None else self.error_map[index]
  
-        # This part is for sampling in global sense
+        # This part is for global sampling 
         if self.opt.error_map:
             rays = get_rays(poses, intrinsics, H, W, num_rays, device=self.device if self.preload else 'cpu', 
                             patch_size=self.opt.patch_size if self.opt.with_mask else 1, incoherent_mask=error_map,
@@ -1015,7 +1019,6 @@ class ColmapDataset:
                             random_sample=random_sample)
             
         # This part is for sampling in local sense
-        
         if self.opt.mixed_sampling and self.training and self.global_step > self.opt.rgb_similarity_iter:
 
             local_indices = torch.randint(0, len(self.poses), size=(self.opt.num_local_sample,), device=self.device if self.preload else 'cpu')
@@ -1043,7 +1046,7 @@ class ColmapDataset:
 
         # print(self.images)
         
-        if not self.training:
+        if not self.training and self.type == 'val':
             img_names = [self.img_names[i] for i in index]
             names_without_suffix = []
             for n in img_names:

@@ -8,13 +8,8 @@
         "shoe_rack",
         "donuts",
         "espresso",
-        "waldo_kitchen"
-    ],
-
-    "3dfront": [
-        "3dfront_0019_00",
-        "3dfront_0091_00",
-        "3dfront_0089_00"
+        "waldo_kitchen",
+        "room"
     ],
 
     "llff": [
@@ -23,9 +18,16 @@
         "fenceflower",
         "fortress",
         "colinepiano",
-        "cecread",
-        "tincan"
+        "cecread"
     ],
+
+
+    "3dfront": [
+        "3dfront_0019_00",
+        "3dfront_0091_00",
+        "3dfront_0089_00"
+    ],
+
 
     "lift": [
         "scene0423_02",

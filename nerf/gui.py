@@ -141,7 +141,6 @@ class NeRFGUI:
 
     
     def test_step(self):
-
         if self.need_update or self.spp < self.opt.max_spp:
         
             starter, ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)

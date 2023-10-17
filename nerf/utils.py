@@ -1288,92 +1288,100 @@ class Trainer(object):
                 pred_rgb = overlay_mask_only(
                     instance_id, color_map=self.color_map, render_id=render_id)
 
-        if self.opt.with_sam:
-            h, w = data['h'], data['w']
-            rays_o_hw = data['rays_o_lr']
-            rays_d_hw = data['rays_d_lr']
-            outputs = self.model.render(rays_o_hw, rays_d_hw, staged=False, index=index, bg_color=bg_color,
-                                        perturb=False, cam_near_far=cam_near_far, return_feats=1, H=h, W=w)
-            pred_samvit = outputs['samvit'].reshape(
-                1, h, w, 256).permute(0, 3, 1, 2).contiguous()
+
 
             # remember new point_3d
-            if point_coords is not None:
-                rays_o = rays_o.view(H, W, 3)
-                rays_d = rays_d.view(H, W, 3)
-                point_depth = pred_depth[point_coords[:,
-                                                      1], point_coords[:, 0]]
-                point_rays_o = rays_o[point_coords[:, 1], point_coords[:, 0]]
-                point_rays_d = rays_d[point_coords[:, 1], point_coords[:, 0]]
-                point_3d = point_rays_o + point_rays_d * \
-                    point_depth.unsqueeze(-1)  # [1, 3]
+        if point_coords is not None:
+            rays_o = rays_o.view(H, W, 3)
+            rays_d = rays_d.view(H, W, 3)
+            point_depth = pred_depth[point_coords[:,1], point_coords[:, 0]]
+            point_rays_o = rays_o[point_coords[:, 1], point_coords[:, 0]]
+            point_rays_d = rays_d[point_coords[:, 1], point_coords[:, 0]]
+            point_3d = point_rays_o + point_rays_d * \
+                point_depth.unsqueeze(-1)  # [1, 3]
 
-                # update current selected points
-                if self.point_3d is None:
-                    self.point_3d = point_3d
+            # update current selected points
+            if self.point_3d is None:
+                self.point_3d = point_3d
+            else:
+                dist = (self.point_3d - point_3d).norm(dim=-1)
+                dist_thresh = 0.01
+                if dist.min() > dist_thresh:
+                    # add if not close to any existed point
+                    # print(f'[INFO] add new point {point_3d}')
+                    self.point_3d = torch.cat(
+                        [self.point_3d, point_3d], dim=0)
                 else:
-                    dist = (self.point_3d - point_3d).norm(dim=-1)
-                    dist_thresh = 0.01
-                    if dist.min() > dist_thresh:
-                        # add if not close to any existed point
-                        # print(f'[INFO] add new point {point_3d}')
-                        self.point_3d = torch.cat(
-                            [self.point_3d, point_3d], dim=0)
+                    # remove existed point if too close
+                    # print(f'[INFO] remove old point mask {dist <= dist_thresh}')
+                    keep_mask = dist > dist_thresh
+                    if keep_mask.any():
+                        self.point_3d = self.point_3d[keep_mask]
                     else:
-                        # remove existed point if too close
-                        # print(f'[INFO] remove old point mask {dist <= dist_thresh}')
-                        keep_mask = dist > dist_thresh
-                        if keep_mask.any():
-                            self.point_3d = self.point_3d[keep_mask]
-                        else:
-                            self.point_3d = None
+                        self.point_3d = None
 
-            # get remembered points coords first
-            inputs_point_coords = None
-            if self.point_3d is not None:
-                print('3d points:')
-                print(self.point_3d)
-                # print('camera pose:')
-                # print(data['poses'])
-                # print('cam_near_far:')
-                # print(cam_near_far)
-                # print()
-                point_3d = torch.cat([self.point_3d, torch.ones_like(
-                    self.point_3d[:, :1])], axis=-1)  # [N, 4]
-                w2c = torch.inverse(data['poses'][0])  # [4, 4]
-                point_3d_cam = point_3d @ w2c.T  # [N, 4]
-                intrinsics = data['intrinsics'][0]  # [4]
-                fx, fy, cx, cy = intrinsics[0], intrinsics[1], intrinsics[2], intrinsics[3]
-                inputs_point_coords = torch.stack([
-                    W - (fx * point_3d_cam[:, 0] / point_3d_cam[:, 2] + cx),
-                    fy * point_3d_cam[:, 1] / point_3d_cam[:, 2] + cy,
-                ], dim=-1).long()  # [N, 2]
-                # mask out-of-screen coords
-                screen_mask = (inputs_point_coords[:, 0] >= 0) & (inputs_point_coords[:, 0] < W) & (
-                    inputs_point_coords[:, 1] >= 0) & (inputs_point_coords[:, 1] < H)
-                if screen_mask.any():
-                    inputs_point_coords = inputs_point_coords[screen_mask]
-                    # depth test to reject those occluded point_coords
-                    point_depth = - point_3d_cam[screen_mask, 2]
-                    observed_depth = pred_depth[inputs_point_coords[:,
-                                                                    1], inputs_point_coords[:, 0]]
-                    unoccluded_mask = (
-                        point_depth - observed_depth).abs() <= 0.05
-                    if unoccluded_mask.any():
-                        inputs_point_coords = inputs_point_coords[unoccluded_mask].detach(
-                        ).cpu().numpy()
-                    else:
-                        inputs_point_coords = None
+        # get remembered points coords first
+        inputs_point_coords = None
+        if self.point_3d is not None:
+            print('3d points:')
+            print(self.point_3d)
+            # print('camera pose:')
+            # print(data['poses'])
+            # print('cam_near_far:')
+            # print(cam_near_far)
+            # print()
+            point_3d = torch.cat([self.point_3d, torch.ones_like(
+                self.point_3d[:, :1])], axis=-1)  # [N, 4]
+            w2c = torch.inverse(data['poses'][0])  # [4, 4]
+            point_3d_cam = point_3d @ w2c.T  # [N, 4]
+            intrinsics = data['intrinsics'][0]  # [4]
+            fx, fy, cx, cy = intrinsics[0], intrinsics[1], intrinsics[2], intrinsics[3]
+            inputs_point_coords = torch.stack([
+                W - (fx * point_3d_cam[:, 0] / point_3d_cam[:, 2] + cx),
+                fy * point_3d_cam[:, 1] / point_3d_cam[:, 2] + cy,
+            ], dim=-1).long()  # [N, 2]
+            # mask out-of-screen coords
+            screen_mask = (inputs_point_coords[:, 0] >= 0) & (inputs_point_coords[:, 0] < W) & (
+                inputs_point_coords[:, 1] >= 0) & (inputs_point_coords[:, 1] < H)
+            if screen_mask.any():
+                inputs_point_coords = inputs_point_coords[screen_mask]
+                # depth test to reject those occluded point_coords
+                point_depth = - point_3d_cam[screen_mask, 2]
+                observed_depth = pred_depth[inputs_point_coords[:,
+                                                                1], inputs_point_coords[:, 0]]
+                unoccluded_mask = (
+                    point_depth - observed_depth).abs() <= 0.05
+                if unoccluded_mask.any():
+                    inputs_point_coords = inputs_point_coords[unoccluded_mask].detach(
+                    ).cpu().numpy()
                 else:
                     inputs_point_coords = None
+            else:
+                inputs_point_coords = None
 
-            if inputs_point_coords is not None:
+        if inputs_point_coords is not None:
+            resize_ratio = 1024 / W if W > H else 1024 / H
+            point_coords = (inputs_point_coords.astype(np.float32)
+                            * resize_ratio).astype(np.int32)
+            original_point_coords = (point_coords / resize_ratio).astype(np.int32)
+            
+            if self.opt.with_sam:
+                h, w = data['h'], data['w']
+                rays_o_hw = data['rays_o_lr']
+                rays_d_hw = data['rays_d_lr']
+                outputs = self.model.render(rays_o_hw, rays_d_hw, staged=False, index=index, bg_color=bg_color,
+                                            perturb=False, cam_near_far=cam_near_far, return_feats=1, H=h, W=w)
+                pred_samvit = outputs['samvit'].reshape(
+                    1, h, w, 256).permute(0, 3, 1, 2).contiguous()
                 # masks, outputs_point_coords, low_res_masks = self.sam_predict(H, W, pred_samvit, inputs_point_coords, image=(pred_rgb.detach().cpu().numpy() * 255).astype(np.uint8))
                 masks, outputs_point_coords, low_res_masks = self.sam_predict(
                     H, W, pred_samvit, inputs_point_coords)
 
                 pred_rgb = overlay_mask(pred_rgb, masks[0])
-                pred_rgb = overlay_point(pred_rgb, outputs_point_coords)
+                
+
+            pred_rgb = overlay_point(pred_rgb, original_point_coords)
+   
         if self.opt.return_extra:
             if self.opt.with_sam:
                 return pred_rgb, pred_depth, pred_samvit

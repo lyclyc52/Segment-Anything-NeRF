@@ -13,7 +13,7 @@ import json
 
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 def show_points(coords, labels, ax, marker_size=375):
     pos_points = coords[labels==1]
     neg_points = coords[labels==0]
@@ -70,7 +70,7 @@ def main(args, pts_3D, input_label):
     
 
 
-    os.makedirs(output_root, exist_ok=True)
+    
     with open(pose_file) as f:
         poses = json.load(f)
     
@@ -119,12 +119,12 @@ def main(args, pts_3D, input_label):
     
     valid_count = {}
     
+    os.makedirs(output_root, exist_ok=True)
+    
     for i in tqdm.tqdm(range(len(frame_names))):
-
-
         rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_rgb.png')
         depth_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_depth.npy')
-        feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}.npy')
+        feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_sam.npy')
         
         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -244,7 +244,7 @@ def main(args, pts_3D, input_label):
                 if j in pts_ids:
                     crucial = True
                     break
-        if valid.sum() >= args.valid_threohould and crucial:
+        if valid.sum() >= args.valid_threshold and crucial:
             valid_count[frame_names[i]] = 1
         else:
             valid_count[frame_names[i]] = 0
@@ -471,25 +471,27 @@ if __name__ == '__main__':
     parser.add_argument('--epoch', type=str, default='0040')
     parser.add_argument('--scene_name', type=str, default='shoe_rack')
     parser.add_argument('--scene_object', type=str, default='blue_shoes')
-    parser.add_argument('--valid_threohould', type=int, default=0)
+    parser.add_argument('--valid_threshold', type=int, default=0)
 
     parser.add_argument('--files_root', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/trial_model')
     parser.add_argument('--purpose',  type=str,
                         default='eval', choices=['train', 'eval'])
+    parser.add_argument('--meta_path', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/scenes_metadata.json')
+    
     
     parser.add_argument('--output_root', type=str, default='/ssddata/yliugu/data')
     parser.add_argument('--output_folder_ending', type=str, default='')
     parser.add_argument('--use_nerf_feature', action='store_true', help='use nerf-rendered feature to obtain the mask')
     parser.add_argument('--decode', action='store_true', help='generate mask if true')
     parser.add_argument('--crucial_point_index', type=int, nargs='*', default=None, help="num steps sampled per ray for each proposal level")
-    
-
 
     args = parser.parse_args()
     
-    args.files_root = os.path.join(args.files_root, f'trial_{args.scene_name}_sam')
+    args.files_root = os.path.join(args.files_root, f'{args.scene_name}')
     if args.purpose == 'eval':
         args.files_root = os.path.join(args.files_root, 'results')
+    elif args.purpose == 'train':
+        args.files_root = os.path.join(args.files_root, 'validation')
     args.pose_file = os.path.join(args.files_root, 'pose_dir.json')
     args.frame_root = args.files_root
     args.camera_poses = os.path.join(args.frame_root, 'camera.npz')
@@ -501,23 +503,25 @@ if __name__ == '__main__':
         scene_object_file = 'nerf'
     args.output_root = os.path.join(args.output_root, args.scene_name, f'{args.purpose}_{args.scene_object}_{scene_object_file}')
     
+    # if os.path.isdir(args.output_root) and len(os.listdir(args.output_root)) != 0:
+    #     exit()
     if args.sam_type == 'sam':
         args.sam_checkpoint = '/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth'
     elif args.sam_type == 'hq_sam':
         args.sam_checkpoint = '/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth'
-        # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_hq_vit_h.pth')
-    # parser.add_argument('--sam_checkpoint', type=str, default='/ssddata/yliugu/Segment-Anything-NeRF/pretrained/sam_vit_h_4b8939.pth')
 
     
     # load reference points:
-    with open('scene_dict.json') as scen_dict_file:
+    with open(args.meta_path) as scen_dict_file:
         scene_dict = json.load(scen_dict_file)
         pts_3D = scene_dict[args.scene_name][args.scene_object]['points']
         pts_3D = torch.tensor(pts_3D)
         input_label = np.ones(pts_3D.shape[0])
         for i in scene_dict[args.scene_name][args.scene_object]['negative_labels']:
             input_label[i] = 0
-    
+        crucial_point_index = scene_dict[args.scene_name][args.scene_object]['crucial_point_index']
+        args.crucial_point_index = None if len(crucial_point_index) == 0 else crucial_point_index
+        args.valid_threshold = scene_dict[args.scene_name][args.scene_object]['valid_threshold']
     
     # # test case 0
     # pts_3D = torch.tensor([[-0.0956, -0.4185, -0.3230],

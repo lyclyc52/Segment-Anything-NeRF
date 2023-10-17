@@ -180,7 +180,7 @@ if __name__ == '__main__':
     # evaluation option
     parser.add_argument('--use_point', action='store_true',
                         help='use point to generate mask')
-    parser.add_argument('--val_type', type=str, default='default', choices=['default', 'val_all'],
+    parser.add_argument('--val_type', type=str, default='default', choices=['default', 'val_all', 'val_split'],
                         help='evaluate all images')
 
     # render mask options
