@@ -47,7 +47,7 @@ for data_type in list(scene_dict.keys()):
             
             # object_name = 'bedside_table'
             object_name = 'sink'
-            iters = 300
+            iters = 250
             rgb_similarity_iter=200
            
             

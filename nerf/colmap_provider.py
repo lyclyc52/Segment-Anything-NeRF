@@ -810,11 +810,12 @@ class ColmapDataset:
                 
                 if self.training:
                     old_valid_mask_index_list = np.array(self.valid_mask_index_list)
-                    if len(old_valid_mask_index_list) // 5 <= 25:
-                        add_sample = np.random.choice(self.valid_mask_index_list, 25)
-                        self.valid_mask_index_list = add_sample
-                    else:
-                        self.valid_mask_index_list = old_valid_mask_index_list[::3]
+                    self.valid_mask_index_list = old_valid_mask_index_list[::3]
+                    if len(self.valid_mask_index_list) < 25:
+                        add_sample = np.random.choice(old_valid_mask_index_list, 25 - len(self.valid_mask_index_list))
+                        self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
+                    
+                        
                         
                         
                     # sample_num = len(self.valid_mask_index_list)
