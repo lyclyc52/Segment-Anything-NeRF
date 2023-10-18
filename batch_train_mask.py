@@ -24,7 +24,7 @@ with open(metadata_path) as f:
 
 for data_type in list(scene_dict.keys()):
     
-    # data_type = 'mip'
+    data_type = 'mip'
     
     
     scene_list = scene_dict[data_type]
@@ -32,7 +32,8 @@ for data_type in list(scene_dict.keys()):
     for scene_name in scene_list:
         
         
-        # scene_name = 'garden'
+        # scene_name = '3dfront_0019_00'
+        scene_name = 'waldo_kitchen'
         
         # print(scene_name)
         
@@ -44,22 +45,19 @@ for data_type in list(scene_dict.keys()):
         
         for object_name in meta[scene_name]:
             
-            # object_name = 'table_whole'
-            
-            iters = 1000
-            rgb_similarity_iter=600
-            workspace_ending = '-rgb'
+            # object_name = 'bedside_table'
+            object_name = 'sink'
+            iters = 300
+            rgb_similarity_iter=200
+           
             
             # use more iterations if their are too many images
 
             ending = 'nerf'
-            use_rgb_loss = [False]
+            use_rgb_loss = [False, True]
             
             
             for use_loss in use_rgb_loss:
-                if not use_loss:
-                    rgb_similarity_iter=iters+1
-                    workspace_ending = ''
                     
                 mask_folder_name = f'train_{object_name}_{ending}'
                 
@@ -71,10 +69,16 @@ for data_type in list(scene_dict.keys()):
                         if valid_points[k] == 1:
                             valid_count += 1
 
-                
-                iters = (valid_count // 5) * 7
-                rgb_similarity_iter = int(iters * 0.8)
+                if (valid_count // 3)*7 > iters:
+                    iters = (valid_count // 5) * 7
                     
+                
+                if not use_loss:
+                    rgb_similarity_iter=iters+1
+                    workspace_ending = ''
+                else:
+                    rgb_similarity_iter = int(iters * 0.6)
+                    workspace_ending = '-rgb'
                     
 
                 object_workspace = path.join(workspace_root, 'mask_nerf', f'{scene_name}-{object_name}-{ending}{workspace_ending}')
@@ -93,6 +97,7 @@ for data_type in list(scene_dict.keys()):
                         '--iters', str(iters),
                         '--mask_mlp_type default',
                         '--contract',
+                        '--val_type val_split',
                         '--rgb_similarity_loss_weight 10', 
                         '--rgb_similarity_threshold 0.15',
                         '--rgb_similarity_iter', str(rgb_similarity_iter), # Enlarge this to disable rgb loss
@@ -104,8 +109,8 @@ for data_type in list(scene_dict.keys()):
                         '--error_map']
                 cmd = ' '.join(cmd)
                 os.system(cmd)
-    #         break
-    #     break
-    # break
+    
+        break
+    break
 
         

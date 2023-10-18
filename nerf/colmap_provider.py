@@ -22,6 +22,9 @@ from .colmap_utils import *
 import pyquaternion as pyquat
 
 
+
+
+
 def nerf_matrix_to_ngp(pose, scale=0.33, offset=[0, 0, 0]):
     # for the fox dataset, 0.33 scales camera radius to ~ 2
     new_pose = np.array([
@@ -686,10 +689,11 @@ class ColmapDataset:
                 if self.opt.with_mask:
                     with open(os.path.join(mask_folder, 'data_split.json')) as f:
                         data_split = json.load(f)
-                        val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
+                        
+                    val_ids = [idx for idx in all_ids if self.img_names[idx][:-4] in data_split['test']]
                 else:
-                    val_ids = [id for id in all_ids if self.img_names[id] in data_split['test']]
-            
+                    val_ids = [idx for idx in all_ids if self.img_names[idx] in data_split['test']]
+
             # val_ids = all_ids[::16]
             if self.type == 'train':
                 train_ids = np.array([i for i in all_ids if i not in val_ids])
@@ -806,11 +810,17 @@ class ColmapDataset:
                 
                 if self.training:
                     old_valid_mask_index_list = np.array(self.valid_mask_index_list)
-                    self.valid_mask_index_list = old_valid_mask_index_list[::5]
-                    sample_num = len(self.valid_mask_index_list)
-                    if sample_num < 25 and self.type != 'llff':
-                        add_sample = np.random.choice(self.valid_mask_index_list, 25 - sample_num)
-                        self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
+                    if len(old_valid_mask_index_list) // 5 <= 25:
+                        add_sample = np.random.choice(self.valid_mask_index_list, 25)
+                        self.valid_mask_index_list = add_sample
+                    else:
+                        self.valid_mask_index_list = old_valid_mask_index_list[::3]
+                        
+                        
+                    # sample_num = len(self.valid_mask_index_list)
+                    # if sample_num < 25 and self.type != 'llff':
+                    #     add_sample = np.random.choice(self.valid_mask_index_list, 25 - sample_num)
+                    #     self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
                     
                         
                     self.valid_mask_index = torch.tensor(self.valid_mask_index_list).to(torch.int)

@@ -22,7 +22,7 @@ with open(metadata_path) as f:
     meta = json.load(f)
 
 scene_list = list(meta.keys())
-scene_list = ["garden"]
+scene_list = ["waldo_kitchen"]
 for scene_name in scene_list:
     
     sam_path = path.join(workspace_root, scene_name)
@@ -36,7 +36,7 @@ for scene_name in scene_list:
     for object_name in list(meta[scene_name].keys()):
         
         
-        object_name = 'table_whole'
+        object_name = 'sink'
         
         cmd = ['python sam_project.py ',
                 '--files_root', workspace_root,

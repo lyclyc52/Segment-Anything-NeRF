@@ -2,7 +2,7 @@
 export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6 
 export CUDA_VISIBLE_DEVICES=0
 python main.py /ssddata/yliugu/data/garden \
---workspace /ssddata/yliugu/trial_model_final/mask_nerf/garden-table_with_vase-nerf \
+--workspace /ssddata/yliugu/trial_model_final/mask_nerf/waldo_kitchen-sink-nerf-rgb \
 --enable_cam_center \
 --with_mask \
 --H 512 \

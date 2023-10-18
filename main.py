@@ -9,6 +9,7 @@ from segment_anything import build_sam, sam_model_registry_baseline, SamPredicto
 # torch.autograd.set_detect_anomaly(True)
 
 if __name__ == '__main__':
+    np.random.seed(0)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('path', type=str)

@@ -95,14 +95,6 @@
             "valid_threshold": 3,
             "crucial_point_index": []
         },
-        "chair": {
-            "points": [[-0.3372,  0.0114, -0.4622],
-            [-0.2546, -0.0070, -0.4598],
-            [-0.4635,  0.0479, -0.4635]],
-            "negative_labels":[],
-            "valid_threshold": 2,
-            "crucial_point_index": []
-        },
         "slippers": {
             "points": [[-0.2091,  0.2506, -0.5660],
                 [-0.2159,  0.1843, -0.5434]],
@@ -172,9 +164,11 @@
             "crucial_point_index": []
         },
         "donut_1":{
-            "points":[[-0.2198,  0.1559, -0.3229]],
+            "points":[[-0.1806,  0.0511, -0.3372],
+            [-0.2143,  0.0147, -0.3186],
+            [-0.2361,  0.0499, -0.2908]],
             "negative_labels": [],
-            "valid_threshold": 1,
+            "valid_threshold": 2,
             "crucial_point_index": []
         },
         "donut_2":{
