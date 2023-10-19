@@ -488,7 +488,10 @@ class MeanIoUMeter:
         self.N += 1
 
     def measure(self):
-        return self.V / self.N
+        if self.N > 0:
+            return self.V / self.N
+        else:
+            return 0
 
     def write(self, writer, global_step, prefix=""):
         writer.add_scalar(os.path.join(prefix, "mIoU"), self.measure(), global_step)
@@ -1157,18 +1160,22 @@ class Trainer(object):
                 pred_mask_flattened = pred_mask.view(-1, self.opt.n_inst)
  
                 pred_mask_flattened = torch.clamp(pred_mask_flattened, min=self.opt.epsilon, max=1-self.opt.epsilon)
- 
-                if labeled.sum() > 0:
-                    loss = -torch.log(torch.gather(pred_mask_flattened[labeled], -1, gt_mask_flattened[labeled][..., None]))
-                else:
-                    loss = torch.tensor(0).to(
-                        pred_mask_flattened.dtype).to(self.device)
-                    
-                loss = loss.mean()
 
-                if self.opt.label_regularization_weight > 0:
-                    loss = loss + self.label_regularization(
-                        outputs['depth'].detach(), pred_mask) * self.opt.label_regularization_weight
+                
+                if not data['use_default_intrinstic']:
+                    if labeled.sum() > 0:
+                        loss = -torch.log(torch.gather(pred_mask_flattened[labeled], -1, gt_mask_flattened[labeled][..., None]))
+                    else:
+                        loss = torch.tensor(0).to(
+                            pred_mask_flattened.dtype).to(self.device)
+                    
+                    loss = loss.mean()
+
+                    if self.opt.label_regularization_weight > 0:
+                        loss = loss + self.label_regularization(
+                            outputs['depth'].detach(), pred_mask) * self.opt.label_regularization_weight
+                else:
+                    loss = torch.tensor(0.)
 
                 # [B, H, W, num_instances]
                 # if self.opt.n_inst > 1: 
@@ -1931,11 +1938,14 @@ class Trainer(object):
                 if self.local_rank == 0:
                     metric_vals = []
                     for metric in self.metrics:
-                        if isinstance(metric, MeanIoUMeter):
-                            pred_masks = preds.argmax(-1)
-                            metric_val = metric.update(pred_masks, truths)
+                        if not loader._data.use_default_intrinstic:
+                            if isinstance(metric, MeanIoUMeter):
+                                pred_masks = preds.argmax(-1)
+                                metric_val = metric.update(pred_masks, truths)
+                            else:
+                                metric_val = metric.update(preds, truths)
                         else:
-                            metric_val = metric.update(preds, truths)
+                            metric_val = torch.tensor(0.)
                         metric_vals.append(metric_val)
 
                     # save image

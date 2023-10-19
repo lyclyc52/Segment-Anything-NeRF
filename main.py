@@ -221,8 +221,7 @@ if __name__ == '__main__':
     from nerf.lerf_provider import LERFDataset
 
     dataset_dict = {
-        'mip': ColmapDataset,
-        'lerf': LERFDataset
+        'mip': ColmapDataset
     }
     NeRFDataset = ColmapDataset
 

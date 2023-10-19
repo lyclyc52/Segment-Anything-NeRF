@@ -140,7 +140,7 @@ class ColmapDataset:
         
 
         
-        if self.opt.data_type != 'mip':
+        if self.opt.data_type != 'mip' and self.opt.data_type != 'lerf' :
             if self.opt.data_type == '3dfront':
                 with open(os.path.join(self.root_path, 'transforms.json'), 'r') as f:
                     transform = json.load(f)  
@@ -218,7 +218,7 @@ class ColmapDataset:
 
                 self.H = int(transform["h"])
                 self.W = int(transform["w"])
-                
+                print(self.H)
                 img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
                 if not os.path.exists(img_folder):
                     img_folder = os.path.join(self.root_path, "images")
@@ -563,7 +563,8 @@ class ColmapDataset:
 
             # process pts3d into sparse depth data.
 
-        if self.type != 'test' and self.opt.data_type == 'mip':
+        self.use_default_intrinstic = False
+        if self.type != 'test' and (self.opt.data_type == 'mip' or self.opt.data_type == 'lerf'):
         
             self.cam_near_far = [] # always extract this infomation
             
@@ -690,7 +691,8 @@ class ColmapDataset:
                 if self.opt.with_mask:
                     with open(os.path.join(mask_folder, 'data_split.json')) as f:
                         data_split = json.load(f)
-                        
+                    if 'use_default_intrinstic'in data_split and data_split['use_default_intrinstic'] == 1:
+                        self.use_default_intrinstic = True
                     val_ids = [idx for idx in all_ids if self.img_names[idx][:-4] in data_split['test']]
                 else:
                     val_ids = [idx for idx in all_ids if self.img_names[idx] in data_split['test']]
@@ -737,7 +739,7 @@ class ColmapDataset:
                     # else: trainval use all.
             
             # read images
-
+            print(self.H)
             if not self.opt.with_sam and not self.opt.with_mask:
                 self.images = []
                 for f in tqdm.tqdm(img_paths, desc=f'Loading {self.type} image'):
@@ -801,7 +803,12 @@ class ColmapDataset:
 
                 
                 self.origin_H, self.origin_W = self.masks.shape[1], self.masks.shape[2]
-                self.H, self.W = self.origin_H, self.origin_W
+                
+                
+                if not self.use_default_intrinstic:
+                    self.H, self.W = self.origin_H, self.origin_W
+                    
+                    
                 if self.opt.rgb_similarity_loss_weight > 0 or self.opt.incoherent_uncertainty_weight < 1:
                     self.gt_incoherent_masks = get_incoherent_mask(self.masks.permute(0,3,1,2), sfact=2)                    
                     self.gt_incoherent_masks = self.gt_incoherent_masks.permute(0,2,3,1).to(torch.bool)[..., 0]
@@ -935,7 +942,7 @@ class ColmapDataset:
         num_rays = -1 # defaul, eval, test, train SAM use all rays
         random_sample = False
         
-
+        
         if self.training and self.opt.use_multi_res and self.global_step > self.opt.rgb_similarity_iter:
             multi_res_step = self.global_step - self.opt.rgb_similarity_iter
             if (multi_res_step - 1 % self.opt.multi_res_update_iter) == 0:
@@ -1003,15 +1010,21 @@ class ColmapDataset:
 
         
         if self.opt.with_mask:
-            # H = W = self.opt.online_resolution 
-            fovy = 60
-            focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
-            intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
-            intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
-    
+            
+            
+            if not self.use_default_intrinstic:
+                H = W = self.opt.online_resolution 
+                fovy = 60
+                focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
+                intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
+                intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
+            
     
 
         results = {'H': H, 'W': W}
+        
+        if self.opt.with_mask:
+            results['use_default_intrinstic'] = self.use_default_intrinstic
 
         if not random_sample and self.opt.patch_size > 1:
             incoherent_mask = self.gt_incoherent_masks[index] if self.gt_incoherent_masks is not None else None

@@ -4,12 +4,14 @@
         "counter",
         "garden",
         "kitchen",
+        "room"
+    ],
+    "lerf":[
         "teatime",
         "shoe_rack",
         "donuts",
         "espresso",
-        "waldo_kitchen",
-        "room"
+        "waldo_kitchen"
     ],
 
     "llff": [

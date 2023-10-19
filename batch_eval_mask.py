@@ -31,11 +31,12 @@ with open(metadata_path) as f:
     meta = json.load(f)
 
 
-
+scene_dict = {}
+scene_dict['3dfront'] = ['3dfront_0019_00', '3dfront_0089_00', '3dfront_0091_00']
 
 for data_type in list(scene_dict.keys()):
     
-    # data_type = 'llff'
+    # data_type = 'llff'·
     
     
     scene_list = scene_dict[data_type]
@@ -43,7 +44,7 @@ for data_type in list(scene_dict.keys()):
     for scene_name in scene_list:
         
         
-        # scene_name = '3dfront_0019_00'
+        # scene_name = 'fenceflower'
         
         # print(scene_name)
         
@@ -59,6 +60,11 @@ for data_type in list(scene_dict.keys()):
             cur_scene_root = os.path.join(scene_root, scene_name)
             object_workspace = path.join(workspace_root, 'mask_nerf', f'{scene_name}-{object_name}-{ending}')
             mask_folder_name = f'train_{object_name}_{ending}'
+            
+            with open(path.join(cur_scene_root, mask_folder_name, 'data_split.json')) as f:
+                eval_json = json.load(f)
+            # if 'use_default_intrinstic' not in eval_json or eval_json['use_default_intrinstic'] != 1:
+            #     continue
             
             cmd = ['python main.py', cur_scene_root,
                     '--workspace', object_workspace,

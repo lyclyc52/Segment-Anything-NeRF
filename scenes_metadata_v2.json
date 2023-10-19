@@ -402,6 +402,15 @@
             "negative_labels":[],
             "valid_threshold": 2,
             "crucial_point_index": []
+        },
+        "sofa":{
+            "points":[[ 1.1798, -0.1984, -0.2318],
+            [ 1.1529, -0.2165, -0.3405],
+            [ 0.9464, -0.1781, -0.4041]],
+            "negative_labels":[],
+            "valid_threshold": 2,
+            "crucial_point_index": []
+
         }
 
         
