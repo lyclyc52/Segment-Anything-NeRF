@@ -5,6 +5,7 @@ import os.path as osp
 
 from nerf.utils import *
 from segment_anything import build_sam, sam_model_registry_baseline, SamPredictor
+import numpy as np
 
 # torch.autograd.set_detect_anomaly(True)
 

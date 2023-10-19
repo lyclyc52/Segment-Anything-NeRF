@@ -1531,20 +1531,21 @@ class Trainer(object):
                 # pred_depth = (pred_depth - pred_depth.min()) / \
                 #     (pred_depth.max() - pred_depth.min() + 1e-6)
                 # pred_depth = (pred_depth * 255).astype(np.uint8)
-
+                
+                file_name = data['img_names'][0] if data['img_names'] is not None else f'{name}_{i:04d}'
                 if write_video:
                     all_preds.append(pred)
                     all_preds_depth.append(pred_depth)
                 else:
-                    cv2.imwrite(os.path.join(save_path, f'{name}_{i:04d}_rgb.png'), cv2.cvtColor(
+                    cv2.imwrite(os.path.join(save_path, f'{file_name}_rgb.png'), cv2.cvtColor(
                         pred, cv2.COLOR_RGB2BGR))
                     np.save(os.path.join(
-                        save_path, f'{name}_{i:04d}_depth.npy'), pred_depth)
+                        save_path, f'{file_name}_depth.npy'), pred_depth)
                     if self.opt.return_extra:
                         pred_extra = pred_extra.detach().cpu().numpy()
                         ending = 'sam' if self.opt.with_sam else 'mask'
-                        np.save(os.path.join(save_path, f'{name}_{i:04d}_{ending}.npy'), pred_extra)
-                pose_dict[f'{i:04d}'] = data['poses'][0].detach().cpu().numpy().tolist()
+                        np.save(os.path.join(save_path, f'{file_name}_{ending}.npy'), pred_extra)
+                pose_dict[f'{file_name}'] = data['poses'][0].detach().cpu().numpy().tolist()
                 pbar.update(loader.batch_size)
         with open(os.path.join(save_path, 'pose_dir.json'), "w+") as f:
             json.dump(pose_dict, f, indent=4)

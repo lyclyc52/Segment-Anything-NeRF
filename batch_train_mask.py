@@ -24,7 +24,7 @@ with open(metadata_path) as f:
 
 for data_type in list(scene_dict.keys()):
     
-    data_type = 'mip'
+    data_type = 'llff'
     
     
     scene_list = scene_dict[data_type]
@@ -33,7 +33,6 @@ for data_type in list(scene_dict.keys()):
         
         
         # scene_name = '3dfront_0019_00'
-        scene_name = 'waldo_kitchen'
         
         # print(scene_name)
         
@@ -43,10 +42,10 @@ for data_type in list(scene_dict.keys()):
         ckpt_path = checkpoint_list[-1]
         scene_data_root = path.join(data_root, scene_name)
         
-        for object_name in meta[scene_name]:
-            
+        
+ for object_name in meta[scene_name]:           
             # object_name = 'bedside_table'
-            object_name = 'sink'
+            # object_name = 'fern'
             iters = 250
             rgb_similarity_iter=200
            
@@ -69,8 +68,10 @@ for data_type in list(scene_dict.keys()):
                         if valid_points[k] == 1:
                             valid_count += 1
 
-                if (valid_count // 3)*7 > iters:
+                if (valid_count // 3) * 10 > iters:
                     iters = (valid_count // 5) * 7
+                elif valid_count * 10 < iters:
+                    iters = valid_count * 10
                     
                 
                 if not use_loss:
@@ -110,7 +111,6 @@ for data_type in list(scene_dict.keys()):
                 cmd = ' '.join(cmd)
                 os.system(cmd)
     
-        break
     break
 
         

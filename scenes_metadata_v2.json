@@ -273,13 +273,6 @@
             "negative_labels":[],
             "valid_threshold": 4,
             "crucial_point_index": []
-        },
-        "bedside_table":{
-            "points":[[ 0.6510,  0.8069, -0.5531],
-            [ 0.7842,  0.8397, -0.7338]],
-            "negative_labels":[],
-            "valid_threshold": 1,
-            "crucial_point_index": []
         }
         
     },
@@ -316,7 +309,7 @@
             [ 0.0772,  0.3461, -0.3656],
             [-0.2533, -0.0773, -0.3929]],
             "negative_labels":[],
-            "valid_threshold": 5,
+            "valid_threshold": 7,
             "crucial_point_index": []
         }
     },
@@ -394,26 +387,10 @@
     },
 
     "replica_room_0":{
-        "sofa":{
-            "points":[[ 1.1798, -0.1984, -0.2318],
-            [ 1.1529, -0.2165, -0.3405],
-            [ 0.9464, -0.1781, -0.4041]],
-            "negative_labels":[],
-            "valid_threshold": 2,
-            "crucial_point_index": []
-
-        },
         "table":{
             "points":[[ 0.2111, -0.0547, -0.3853],
             [ 0.3541,  0.1580, -0.3609],
             [ 0.5151,  0.1237, -0.3562]],
-            "negative_labels":[],
-            "valid_threshold": 2,
-            "crucial_point_index": []
-        },
-        "chair":{
-            "points":[[-0.4047,  0.3051, -0.3870],
-            [-0.5406,  0.3360, -0.3518]],
             "negative_labels":[],
             "valid_threshold": 2,
             "crucial_point_index": []

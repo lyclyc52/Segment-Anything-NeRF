@@ -673,6 +673,7 @@ class ColmapDataset:
             self.masks = None
             self.gt_incoherent_masks = None
             self.error_map = None
+            self.img_names = None
         
         else:
             all_ids = np.arange(len(img_paths))
@@ -680,7 +681,7 @@ class ColmapDataset:
             with open(os.path.join(self.root_path, 'data_split.json')) as f:
                 data_split = json.load(f)
             # train_ids = [id for id in all_ids if self.img_names[id] in data_split['train']]
-
+            
             if self.opt.val_type == 'default':
                 val_ids = all_ids[::16]
             elif self.opt.val_type == 'val_all':
@@ -810,12 +811,14 @@ class ColmapDataset:
                 
                 if self.training:
                     old_valid_mask_index_list = np.array(self.valid_mask_index_list)
-                    self.valid_mask_index_list = old_valid_mask_index_list[::3]
-                    if len(self.valid_mask_index_list) < 25:
-                        add_sample = np.random.choice(old_valid_mask_index_list, 25 - len(self.valid_mask_index_list))
-                        self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
                     
-                        
+                    if old_valid_mask_index_list.shape[0] > 25:
+                        self.valid_mask_index_list = old_valid_mask_index_list[::3]
+                        if len(self.valid_mask_index_list) < 25:
+                            add_sample = np.random.choice(old_valid_mask_index_list, 25 - len(self.valid_mask_index_list))
+                            self.valid_mask_index_list = np.concatenate([self.valid_mask_index_list, add_sample])
+                    else:
+                        self.valid_mask_index_list = old_valid_mask_index_list
                         
                         
                     # sample_num = len(self.valid_mask_index_list)
@@ -828,9 +831,7 @@ class ColmapDataset:
                 
                     self.poses = self.poses[self.valid_mask_index]
                     self.masks = self.masks[self.valid_mask_index]
-                    # for m in range(self.masks.shape[0]):
-                    #     print(self.masks[m].sum())
-                    # exit()
+
                     self.confident_masks = self.masks.clone()
                     self.img_names = [self.img_names[idx] for idx in self.valid_mask_index_list]
                     if self.gt_incoherent_masks is not None:
@@ -1062,12 +1063,15 @@ class ColmapDataset:
 
         # print(self.images)
         
-        if not self.training and self.type == 'val':
+        if self.img_names is not None:
+            
             img_names = [self.img_names[i] for i in index]
             names_without_suffix = []
             for n in img_names:
                 names_without_suffix.append(n[:-4])
             results['img_names'] = names_without_suffix
+        else:
+            results['img_names'] = None
 
         if self.images is not None:
             if num_rays != -1:
