@@ -32,11 +32,11 @@ with open(metadata_path) as f:
 
 
 scene_dict = {}
-scene_dict['3dfront'] = ['3dfront_0019_00', '3dfront_0089_00', '3dfront_0091_00']
+scene_dict['lift'] = ['ctr_lift_0', 'ctr_lift_1', 'ctr_lift_2']
 
 for data_type in list(scene_dict.keys()):
     
-    # data_type = 'llff'·
+    # data_type = 'llff'
     
     
     scene_list = scene_dict[data_type]

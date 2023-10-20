@@ -44,17 +44,20 @@ def main(model_root):
                     eval_img_names = json.load(f)
                     eval_img_names = eval_img_names['test']
                 
-                if len(eval_img_names) < 10 and data_type != 'llff':
-                    print(scene_name, object_name)
+                # if len(eval_img_names) < 10 and data_type != 'llff':
+                #     print(scene_name, object_name)
                     
                     
-                    
+                cur_iou = 0
+                cur_acc = 0
+                cur_count = 0
                 for eval_img in eval_img_names:
                     inference_path = path.join(object_workspace, 'results', f'{eval_img}_mask.npy')
                     gt_path = path.join(gt_mask_folder, f'refined_mask_{eval_img}.png')
                     inference = np.load(inference_path)
                     
                     inference = inference.argmax(-1)
+                    
                     
                     gt_img = cv2.imread(gt_path)[..., 0]
                     if inference.shape[0] != gt_img.shape[0]:
@@ -63,11 +66,20 @@ def main(model_root):
                         
                     gt_img = gt_img > 128
                     
-                    total_acc += eval_acc(inference, gt_img)
-                    total_iou += eval_iou(inference, gt_img)
-                    cv2.imwrite(path.join(gt_mask_folder, f'pred_mask_{eval_img}.png'), inference*255)
-                    count +=1
                     
+                    
+                    cur_acc += eval_acc(inference, gt_img)
+                    cur_iou += eval_iou(inference, gt_img)
+                    cv2.imwrite(path.join(gt_mask_folder, f'pred_mask_{eval_img}.png'), inference*255)
+                    cur_count +=1
+
+                # print(scene_name, object_name)
+                # print('iou: ', cur_iou / cur_count)
+                # print('acc: ', cur_acc / cur_count)
+                
+                count += cur_count
+                total_acc += cur_acc
+                total_iou += cur_iou
                     
                 
         print(f'{data_type}:')

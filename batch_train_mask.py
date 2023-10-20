@@ -24,7 +24,7 @@ with open(metadata_path) as f:
 
 for data_type in list(scene_dict.keys()):
     
-    data_type = 'llff'
+    data_type = 'lerf'
     
     
     scene_list = scene_dict[data_type]
@@ -32,7 +32,7 @@ for data_type in list(scene_dict.keys()):
     for scene_name in scene_list:
         
         
-        # scene_name = '3dfront_0019_00'
+        scene_name = 'donuts'
         
         # print(scene_name)
         
@@ -42,13 +42,13 @@ for data_type in list(scene_dict.keys()):
         ckpt_path = checkpoint_list[-1]
         scene_data_root = path.join(data_root, scene_name)
         
-        
- for object_name in meta[scene_name]:           
+                
+        for object_name in meta[scene_name]:           
             # object_name = 'bedside_table'
-            # object_name = 'fern'
+            object_name = 'donut_1'
             iters = 250
             rgb_similarity_iter=200
-           
+        
             
             # use more iterations if their are too many images
 
@@ -110,7 +110,7 @@ for data_type in list(scene_dict.keys()):
                         '--error_map']
                 cmd = ' '.join(cmd)
                 os.system(cmd)
-    
-    break
+            
+            break
 
-        
+                
