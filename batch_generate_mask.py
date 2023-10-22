@@ -22,7 +22,7 @@ with open(metadata_path) as f:
     meta = json.load(f)
 
 scene_list = list(meta.keys())
-scene_list = ["donuts"]
+# scene_list = ["donuts"]
 for scene_name in scene_list:
     
     sam_path = path.join(workspace_root, scene_name)
@@ -36,7 +36,7 @@ for scene_name in scene_list:
     for object_name in list(meta[scene_name].keys()):
         
         
-        object_name = 'donut_1'
+        # object_name = 'donut_1'
         
         cmd = ['python sam_project.py ',
                 '--files_root', workspace_root,
@@ -46,7 +46,7 @@ for scene_name in scene_list:
                 '--epoch', epoch,
                 '--meta_path', metadata_path,
                 '--decode',
-                '--purpose train'
+                '--purpose eval'
             ]
         # cmd = ' '.join(cmd)
         choice_0 = ['--use_nerf_feature', '']
@@ -56,8 +56,8 @@ for scene_name in scene_list:
             cur_cmd = ' '.join(cur_cmd)
             os.system(cur_cmd)
 
-        break
-    break
+    #     break
+    # break
 
 
 # for scene_type in list(scene_dict.keys()):

@@ -357,7 +357,10 @@ class PSNRMeter:
         return psnr
 
     def measure(self):
-        return self.V / self.N
+        if self.N == 0:
+            return 0
+        else:
+            return self.V / self.N
 
     def write(self, writer, global_step, prefix=""):
         writer.add_scalar(os.path.join(prefix, "PSNR"),
@@ -402,7 +405,10 @@ class LPIPSMeter:
         return v
 
     def measure(self):
-        return self.V / self.N
+        if self.N > 0:
+            return self.V / self.N
+        else:
+            return 0
 
     def write(self, writer, global_step, prefix=""):
         writer.add_scalar(os.path.join(
@@ -444,7 +450,10 @@ class SSIMMeter:
         self.N += 1
 
     def measure(self):
-        return self.V / self.N
+        if self.N > 0:
+            return self.V / self.N
+        else:
+            return 0
 
     def write(self, writer, global_step, prefix=""):
         writer.add_scalar(os.path.join(prefix, "SSIM"),
@@ -608,6 +617,7 @@ class Trainer(object):
                 self.model.parameters(), decay=ema_decay)
         else:
             self.ema = None
+
 
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.fp16)
 
@@ -1295,7 +1305,14 @@ class Trainer(object):
                 pred_rgb = overlay_mask_only(
                     instance_id, color_map=self.color_map, render_id=render_id)
 
-
+        if self.opt.with_sam:
+                h, w = data['h'], data['w']
+                rays_o_hw = data['rays_o_lr']
+                rays_d_hw = data['rays_d_lr']
+                outputs = self.model.render(rays_o_hw, rays_d_hw, staged=False, index=index, bg_color=bg_color,
+                                            perturb=False, cam_near_far=cam_near_far, return_feats=1, H=h, W=w)
+                pred_samvit = outputs['samvit'].reshape(
+                    1, h, w, 256).permute(0, 3, 1, 2).contiguous()
 
             # remember new point_3d
         if point_coords is not None:
@@ -1372,19 +1389,11 @@ class Trainer(object):
                             * resize_ratio).astype(np.int32)
             original_point_coords = (point_coords / resize_ratio).astype(np.int32)
             
-            if self.opt.with_sam:
-                h, w = data['h'], data['w']
-                rays_o_hw = data['rays_o_lr']
-                rays_d_hw = data['rays_d_lr']
-                outputs = self.model.render(rays_o_hw, rays_d_hw, staged=False, index=index, bg_color=bg_color,
-                                            perturb=False, cam_near_far=cam_near_far, return_feats=1, H=h, W=w)
-                pred_samvit = outputs['samvit'].reshape(
-                    1, h, w, 256).permute(0, 3, 1, 2).contiguous()
-                # masks, outputs_point_coords, low_res_masks = self.sam_predict(H, W, pred_samvit, inputs_point_coords, image=(pred_rgb.detach().cpu().numpy() * 255).astype(np.uint8))
-                masks, outputs_point_coords, low_res_masks = self.sam_predict(
-                    H, W, pred_samvit, inputs_point_coords)
+            # masks, outputs_point_coords, low_res_masks = self.sam_predict(H, W, pred_samvit, inputs_point_coords, image=(pred_rgb.detach().cpu().numpy() * 255).astype(np.uint8))
+            masks, outputs_point_coords, low_res_masks = self.sam_predict(
+                H, W, pred_samvit, inputs_point_coords)
 
-                pred_rgb = overlay_mask(pred_rgb, masks[0])
+            pred_rgb = overlay_mask(pred_rgb, masks[0])
                 
 
             pred_rgb = overlay_point(pred_rgb, original_point_coords)

@@ -32,7 +32,7 @@ with open(metadata_path) as f:
 
 
 scene_dict = {}
-scene_dict['lift'] = ['ctr_lift_0', 'ctr_lift_1', 'ctr_lift_2']
+scene_dict['lift'] = ['replica_room_0']
 
 for data_type in list(scene_dict.keys()):
     

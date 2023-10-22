@@ -10,6 +10,7 @@ from segment_anything import sam_model_registry, SamPredictor, sam_model_registr
 import torch.nn.functional as F
 import argparse
 import json
+import shutil
 
 
 
@@ -95,9 +96,10 @@ def main(args, pts_3D, input_label):
     predictor = SamPredictor(sam)
 
 
-
-    rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[0]}_rgb.png')
-    
+    if args.purpose == 'traing':
+        rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[0]}_rgb.png')
+    else:
+        rgb_name = os.path.join(frame_root, f'{frame_names[0]}_rgb.png')
     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     predictor.set_image(image)
@@ -122,10 +124,14 @@ def main(args, pts_3D, input_label):
     os.makedirs(output_root, exist_ok=True)
     
     for i in tqdm.tqdm(range(len(frame_names))):
-        rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_rgb.png')
-        depth_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_depth.npy')
-        feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_sam.npy')
-        
+        if args.purpose == 'train':
+            rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_rgb.png')
+            depth_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_depth.npy')
+            feature_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[i]}_sam.npy')
+        elif args.purpose == 'eval':
+            rgb_name = os.path.join(frame_root, f'{frame_names[i]}_rgb.png')
+            depth_name = os.path.join(frame_root, f'{frame_names[i]}_depth.npy')
+            feature_name = os.path.join(frame_root, f'{frame_names[i]}_sam.npy')
         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
@@ -490,9 +496,10 @@ if __name__ == '__main__':
     args.files_root = os.path.join(args.files_root, f'{args.scene_name}')
     if args.purpose == 'eval':
         args.files_root = os.path.join(args.files_root, 'results')
+        args.pose_file = os.path.join(args.files_root, f'train_{args.scene_object}_nerf_pose_dir.json')
     elif args.purpose == 'train':
         args.files_root = os.path.join(args.files_root, 'validation')
-    args.pose_file = os.path.join(args.files_root, 'pose_dir.json')
+        args.pose_file = os.path.join(args.files_root, 'pose_dir.json')
     args.frame_root = args.files_root
     args.camera_poses = os.path.join(args.frame_root, 'camera.npz')
     
@@ -502,7 +509,10 @@ if __name__ == '__main__':
     if args.use_nerf_feature:
         scene_object_file = 'nerf'
     args.output_root = os.path.join(args.output_root, args.scene_name, f'{args.purpose}_{args.scene_object}_{scene_object_file}')
-    
+    if os.path.isdir( args.output_root):
+        shutil.rmtree( args.output_root)
+        
+        
     # if os.path.isdir(args.output_root) and len(os.listdir(args.output_root)) != 0:
     #     exit()
     if args.sam_type == 'sam':

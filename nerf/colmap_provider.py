@@ -205,16 +205,11 @@ class ColmapDataset:
                 feature_paths = feature_paths[exist_mask]
                 self.poses = self.poses[exist_mask]
                 self.intrinsics= self.intrinsics[exist_mask]
-                if self.opt.with_mask:
-                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
 
             elif self.opt.data_type == 'llff':
 
                 with open(os.path.join(self.root_path, 'transforms.json'), 'r') as f:
                     transform = json.load(f)
-
-
 
                 self.H = int(transform["h"])
                 self.W = int(transform["w"])
@@ -263,10 +258,6 @@ class ColmapDataset:
                 # self.poses = self.poses[:, [1, 0, 2, 3], :]
                 # self.cam_near_far = torch.from_numpy(np.stack(cam_near_far))
                 
-                if self.opt.with_mask:
-                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
-
                 feature_folder = os.path.join(self.root_path, 'sam_features')
                 feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
                 
@@ -358,18 +349,15 @@ class ColmapDataset:
                 feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
                 
                 
-                if self.opt.with_mask:
-                    mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-                    mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
-
                 exist_mask = np.array([os.path.exists(f) for f in img_paths])
                 print(f'[INFO] {exist_mask.sum()} image exists in all {exist_mask.shape[0]} colmap entries.')
                 img_paths = img_paths[exist_mask]
                 feature_paths = feature_paths[exist_mask]
                 self.poses = self.poses[exist_mask]
                 self.intrinsics= self.intrinsics[exist_mask]
-            elif self.opt.data_type == 'pano':
-                                   
+
+
+            elif self.opt.data_type == 'pano':         
                 img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
                 if not os.path.exists(img_folder):
                     img_folder = os.path.join(self.root_path, "images")
@@ -474,11 +462,6 @@ class ColmapDataset:
             img_paths = np.array([os.path.join(img_folder, name) for name in img_names])
             
             
-            if self.opt.with_mask:
-                mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
-                mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
-
-            
 
             feature_folder = os.path.join(self.root_path, 'sam_features')
             feature_paths = np.array([os.path.join(feature_folder, name + '.npz') for name in img_names])
@@ -563,7 +546,14 @@ class ColmapDataset:
 
             # process pts3d into sparse depth data.
 
+        if self.opt.mask_folder_name is not None:
+            mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
+            if self.opt.with_mask:
+                mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
         self.use_default_intrinstic = False
+        
+        
+        
         if self.type != 'test' and (self.opt.data_type == 'mip' or self.opt.data_type == 'lerf'):
         
             self.cam_near_far = [] # always extract this infomation
@@ -688,14 +678,11 @@ class ColmapDataset:
             elif self.opt.val_type == 'val_all':
                 val_ids = all_ids
             elif self.opt.val_type == 'val_split':
-                if self.opt.with_mask:
-                    with open(os.path.join(mask_folder, 'data_split.json')) as f:
-                        data_split = json.load(f)
-                    if 'use_default_intrinstic'in data_split and data_split['use_default_intrinstic'] == 1:
-                        self.use_default_intrinstic = True
-                    val_ids = [idx for idx in all_ids if self.img_names[idx][:-4] in data_split['test']]
-                else:
-                    val_ids = [idx for idx in all_ids if self.img_names[idx] in data_split['test']]
+                with open(os.path.join(mask_folder, 'data_split.json')) as f:
+                    data_split = json.load(f)
+                if 'use_default_intrinstic'in data_split and data_split['use_default_intrinstic'] == 1:
+                    self.use_default_intrinstic = True
+                val_ids = [idx for idx in all_ids if self.img_names[idx][:-4] in data_split['test']]
 
             # val_ids = all_ids[::16]
             if self.type == 'train':
@@ -706,7 +693,7 @@ class ColmapDataset:
                 feature_paths = feature_paths[train_ids]
                 if self.opt.with_mask:
                     mask_paths = mask_paths[train_ids]
-                    self.img_names = self.img_names[train_ids]
+                self.img_names = self.img_names[train_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[train_ids]
             elif self.type == 'val':
@@ -716,7 +703,7 @@ class ColmapDataset:
                 feature_paths = feature_paths[val_ids]
                 if self.opt.with_mask:
                     mask_paths = mask_paths[val_ids]
-                    self.img_names = self.img_names[val_ids]
+                self.img_names = self.img_names[val_ids]
                 if self.cam_near_far is not None:
                     self.cam_near_far = self.cam_near_far[val_ids]
             # elif self.type == 'test':
@@ -870,11 +857,15 @@ class ColmapDataset:
 
         self.poses = torch.from_numpy(self.poses.astype(np.float32)) # [N, 4, 4]
         
-        if self.opt.val_type == 'val_all' and self.type == 'val':
+        if (self.opt.val_type == 'val_all' or self.opt.val_type == 'val_split') and self.type == 'val':
             pose_dict = {}
             for i in range(len(self.img_names)):
                 pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
-            with open(os.path.join(self.opt.workspace, 'validation', 'pose_dir.json'), "w+") as f:
+            save_root = 'validation' if self.opt.val_type == 'val_all' else 'results'
+            pose_file_name = 'pose_dir.json'
+            if self.opt.mask_folder_name is not None:
+                pose_file_name = f'{self.opt.mask_folder_name}_{pose_file_name}'
+            with open(os.path.join(self.opt.workspace, save_root, pose_file_name), "w+") as f:
                 json.dump(pose_dict, f, indent=4)
 
 
@@ -994,24 +985,25 @@ class ColmapDataset:
 
         if self.opt.with_sam and not self.opt.with_mask:
             # augment poses
-            if self.training:    
-                H = W = self.opt.online_resolution
-                fovy = 50 + 20 * random.random()
-                focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
-                intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
-                intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
-            # still use fixed pose, but change intrinsics
-            else:
-                H = W = self.opt.online_resolution
-                fovy = 60
-                focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
-                intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
-                intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
+            if not self.use_default_intrinstic:
+                if self.training:    
+                    H = W = self.opt.online_resolution
+                    fovy = 50 + 20 * random.random()
+                    focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
+                    intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
+                    intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
+                # still use fixed pose, but change intrinsics
+                else:
+                    H = W = self.opt.online_resolution
+                    fovy = 60
+                    focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
+                    intrinsics = np.array([focal, focal, H / 2, W / 2], dtype=np.float32)
+                    intrinsics = torch.from_numpy(intrinsics).unsqueeze(0).to(self.device)
 
-        
+                
+                
+                
         if self.opt.with_mask:
-            
-            
             if not self.use_default_intrinstic:
                 H = W = self.opt.online_resolution 
                 fovy = 60
@@ -1190,7 +1182,10 @@ class ColmapDataset:
 
 
         if self.opt.with_sam and not self.opt.with_mask:
-            scale = 16 * self.opt.online_resolution // 1024 
+            if self.use_default_intrinstic:
+                scale = max(H, W) * 16 // 1024
+            else:
+                scale = 16 * self.opt.online_resolution // 1024 
             rays_lr = get_rays(poses, intrinsics / scale, H // scale, W // scale, num_rays, device=self.device if self.preload else 'cpu')
             results['rays_o_lr'] = rays_lr['rays_o'].to(self.device)
             results['rays_d_lr'] = rays_lr['rays_d'].to(self.device)

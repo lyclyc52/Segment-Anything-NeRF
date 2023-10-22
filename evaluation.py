@@ -61,7 +61,7 @@ def main(model_root):
                     
                     gt_img = cv2.imread(gt_path)[..., 0]
                     if inference.shape[0] != gt_img.shape[0]:
-                        print(scene_name)
+                        # print(scene_name)
                         gt_img = cv2.resize(gt_img, (inference.shape[1], inference.shape[0]))
                         
                     gt_img = gt_img > 128

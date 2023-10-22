@@ -137,13 +137,7 @@
     },
 
     "waldo_kitchen":{
-        "blue_bottle": {
-            "points":[[-0.4717, -0.1188, -0.1243]
-            ],
-            "negative_labels": [],
-            "valid_threshold": 1,
-            "crucial_point_index": []
-        },
+
         "sink":{
             "points":[[-0.4602, -0.1130, -0.2257],
             [-0.4893, -0.3436, -0.2156],
@@ -159,6 +153,14 @@
             [-0.2599, -0.3687, -0.2865]],
             "negative_labels": [],
             "valid_threshold": 8,
+            "crucial_point_index": []
+        },
+        
+        "blue_bottle": {
+            "points":[[-0.4717, -0.1188, -0.1243]
+            ],
+            "negative_labels": [],
+            "valid_threshold": 1,
             "crucial_point_index": []
         }
     },

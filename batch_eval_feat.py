@@ -3,6 +3,7 @@ import os
 import json
 from tqdm import tqdm
 import shutil
+import os.path as path
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
@@ -11,35 +12,47 @@ workspace = '/ssddata/yliugu/trial_model_final'
 with open(scene_dict) as f:
     scene_dict = json.load(f)
     
-scene_root = '/ssddata/yliugu/data'
 
+
+data_root = '/ssddata/yliugu/data'
+metadata_path = '/ssddata/yliugu/Segment-Anything-NeRF/scenes_metadata_v2.json'
+with open(metadata_path) as f:
+    meta = json.load(f)
     
 for scene_type in list(scene_dict.keys()):
     
+    # scene_type = 'mip'
+    scene_list = scene_dict[scene_type]
     
-    scene_type = 'mip'
-    
-    for scene in tqdm(scene_dict[scene_type]):
+    for scene_name in scene_list:
         
-        scene = 'garden'
+        # scene = 'garden'
+        scene_data_root = path.join(data_root, scene_name)
+        
+        for object_name in meta[scene_name]:
+            ending = 'nerf'
+            cur_scene_root = os.path.join(data_root, scene_name)
+            mask_folder_name = f'train_{object_name}_{ending}'
+            
+            
+            cmd = ['python main.py', cur_scene_root,
+                    '--workspace', os.path.join(workspace, 'sam_nerf', scene_name),
+                    '--enable_cam_center', 
+                    '--downscale 1',
+                    '--data_type', scene_type, 
+                    '--test', 
+                    '--test_split val', 
+                    '--val_type val_split',
+                    '--mask_folder', mask_folder_name,
+                    '--with_sam',
+                    '--num_rays 16384',
+                    '--contract', 
+                    '--sam_use_view_direction', 
+                    '--return_extra'
+                ]
 
-        cur_scene_root = os.path.join(scene_root, scene)
-        cmd = ['python main.py', os.path.join(scene_root, scene),
-                '--workspace', os.path.join(workspace, 'sam_nerf', scene),
-                '--enable_cam_center', 
-                '--downscale 1',
-                '--data_type', scene_type, 
-                '--test', 
-                '--test_split val', 
-                '--val_type val_all',
-                '--with_sam',
-                '--num_rays 16384',
-                '--contract', 
-                '--sam_use_view_direction', 
-                '--return_extra'
-            ]
-
-        cmd = ' '.join(cmd)
-        os.system(cmd)
-        break
-    break
+            cmd = ' '.join(cmd)
+            os.system(cmd)
+    #         break
+    #     break
+    # break
