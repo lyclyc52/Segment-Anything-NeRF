@@ -134,10 +134,7 @@ class ColmapDataset:
 
         # locate colmap dir
         
-        
-        
-        
-        
+
 
         
         if self.opt.data_type != 'mip' and self.opt.data_type != 'lerf' :
@@ -213,7 +210,7 @@ class ColmapDataset:
 
                 self.H = int(transform["h"])
                 self.W = int(transform["w"])
-                print(self.H)
+
                 img_folder = os.path.join(self.root_path, f"images_{self.downscale}")
                 if not os.path.exists(img_folder):
                     img_folder = os.path.join(self.root_path, "images")
@@ -550,12 +547,11 @@ class ColmapDataset:
             mask_folder = os.path.join(self.root_path, self.opt.mask_folder_name)
             if self.opt.with_mask:
                 mask_paths = np.array([os.path.join(mask_folder, name) for name in img_names])
-        self.use_default_intrinstic = False
+        self.use_default_intrinsics = self.opt.use_default_intrinsics
         
         
         
         if self.type != 'test' and (self.opt.data_type == 'mip' or self.opt.data_type == 'lerf'):
-        
             self.cam_near_far = [] # always extract this infomation
             
             print(f'[INFO] extracting sparse depth info...')
@@ -678,13 +674,14 @@ class ColmapDataset:
             elif self.opt.val_type == 'val_all':
                 val_ids = all_ids
             elif self.opt.val_type == 'val_split':
-                with open(os.path.join(mask_folder, 'data_split.json')) as f:
+                with open('/ssddata/yliugu/Segment-Anything-NeRF/scenes_test_view.json') as f:
                     data_split = json.load(f)
-                if 'use_default_intrinstic'in data_split and data_split['use_default_intrinstic'] == 1:
-                    self.use_default_intrinstic = True
-                val_ids = [idx for idx in all_ids if self.img_names[idx][:-4] in data_split['test']]
+                test_view_list = data_split[self.opt.scene_name][self.opt.object_name]
+
+                val_ids = [idx for idx in all_ids if self.img_names[idx][:-4] in test_view_list]
 
             # val_ids = all_ids[::16]
+            print(val_ids)
             if self.type == 'train':
                 train_ids = np.array([i for i in all_ids if i not in val_ids])
                 self.poses = self.poses[train_ids]
@@ -726,7 +723,7 @@ class ColmapDataset:
                     # else: trainval use all.
             
             # read images
-            print(self.H)
+
             if not self.opt.with_sam and not self.opt.with_mask:
                 self.images = []
                 for f in tqdm.tqdm(img_paths, desc=f'Loading {self.type} image'):
@@ -756,16 +753,21 @@ class ColmapDataset:
                 self.masks = []
                 self.valid_mask_index_list = []
                 if self.training:
+                    print(os.path.join(mask_folder, 'valid.json'))
                     with open(os.path.join(mask_folder, 'valid.json')) as f:
                         valid_dict = json.load(f)
-                    
+                        
+
                 for idx in tqdm.tqdm(range(len(mask_paths)), desc=f'Loading {self.type} mask'):
                     f = mask_paths[idx]
                     f = f.replace('.jpg', '_masks.npy').replace('.JPG', '_masks.npy').replace('.png', '_masks.npy').replace('.PNG', '_masks.npy')
                     if os.path.isfile(f):
                         mask = torch.from_numpy(np.load(f))
+
+                        if mask.shape[0] != 512:
+                            mask = torch.zeros([512, 512, 1])
                     else:
-                        mask = torch.zeros([512, 512])
+                        mask = torch.zeros([512, 512, 1])
                     
                     
                     # mask_list = ['DSC07956', 'DSC07957', 'DSC07958', 'DSC07959', 'DSC07960', 'DSC07961', 'DSC07963',
@@ -775,24 +777,21 @@ class ColmapDataset:
                     #              ]
                     # print(valid_dict)
                     # exit()
+
                     if self.training:
                         if mask.sum()>=10 and validate_file(f) and valid_dict[self.img_names[idx][:-4]]:
-                            self.valid_mask_index_list.append(idx)
-                            
-                        # if self.img_names[idx][:-4] in mask_list:
-                        #     self.valid_mask_index_list.append(idx)    
+                            self.valid_mask_index_list.append(idx)     
 
-                
+                    
                     self.masks.append(mask.to(int))
                 self.masks = torch.stack(self.masks, axis=0)
                 if len(self.masks.shape) != 4:
                     self.masks = self.masks[..., None]
 
-                
                 self.origin_H, self.origin_W = self.masks.shape[1], self.masks.shape[2]
                 
                 
-                if not self.use_default_intrinstic:
+                if not self.use_default_intrinsics:
                     self.H, self.W = self.origin_H, self.origin_W
                     
                     
@@ -805,7 +804,7 @@ class ColmapDataset:
                 
                 if self.training:
                     old_valid_mask_index_list = np.array(self.valid_mask_index_list)
-                    
+                    print(old_valid_mask_index_list)
                     if old_valid_mask_index_list.shape[0] > 25:
                         self.valid_mask_index_list = old_valid_mask_index_list[::3]
                         if len(self.valid_mask_index_list) < 25:
@@ -860,14 +859,18 @@ class ColmapDataset:
         if (self.opt.val_type == 'val_all' or self.opt.val_type == 'val_split') and self.type == 'val':
             pose_dict = {}
             for i in range(len(self.img_names)):
-                pose_dict[self.img_names[i][:-4]] = self.poses[i].numpy().tolist()
-            save_root = 'validation' if self.opt.val_type == 'val_all' else 'results'
+                pose_dict[self.img_names[i][:-4]] = {}
+                pose_dict[self.img_names[i][:-4]]['c2w'] = self.poses[i].numpy().tolist()
+                pose_dict[self.img_names[i][:-4]]['intrinsics'] = self.intrinsics[i].numpy().tolist()
+            # save_root = 'validation' if self.test_split == 'val_all' else 'results'
+            save_root = 'results'
             pose_file_name = 'pose_dir.json'
             if self.opt.mask_folder_name is not None:
                 pose_file_name = f'{self.opt.mask_folder_name}_{pose_file_name}'
-            with open(os.path.join(self.opt.workspace, save_root, pose_file_name), "w+") as f:
-                json.dump(pose_dict, f, indent=4)
-
+            # with open(os.path.join(self.opt.workspace, save_root, pose_file_name), "w+") as f:
+            #     json.dump(pose_dict, f, indent=4)
+            # print(os.path.join(self.opt.workspace, save_root, pose_file_name))
+            # exit()
 
         if self.images is not None:
             self.images = torch.from_numpy(self.images.astype(np.uint8)) # [N, H, W, C]
@@ -985,7 +988,7 @@ class ColmapDataset:
 
         if self.opt.with_sam and not self.opt.with_mask:
             # augment poses
-            if not self.use_default_intrinstic:
+            if not self.use_default_intrinsics:
                 if self.training:    
                     H = W = self.opt.online_resolution
                     fovy = 50 + 20 * random.random()
@@ -1004,7 +1007,7 @@ class ColmapDataset:
                 
                 
         if self.opt.with_mask:
-            if not self.use_default_intrinstic:
+            if not self.use_default_intrinsics:
                 H = W = self.opt.online_resolution 
                 fovy = 60
                 focal = H / (2 * np.tan(0.5 * fovy * np.pi / 180))
@@ -1015,8 +1018,8 @@ class ColmapDataset:
 
         results = {'H': H, 'W': W}
         
-        if self.opt.with_mask:
-            results['use_default_intrinstic'] = self.use_default_intrinstic
+
+        results['use_default_intrinsics'] = self.use_default_intrinsics
 
         if not random_sample and self.opt.patch_size > 1:
             incoherent_mask = self.gt_incoherent_masks[index] if self.gt_incoherent_masks is not None else None
@@ -1182,7 +1185,7 @@ class ColmapDataset:
 
 
         if self.opt.with_sam and not self.opt.with_mask:
-            if self.use_default_intrinstic:
+            if self.use_default_intrinsics:
                 scale = max(H, W) * 16 // 1024
             else:
                 scale = 16 * self.opt.online_resolution // 1024 

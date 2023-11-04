@@ -1172,7 +1172,7 @@ class Trainer(object):
                 pred_mask_flattened = torch.clamp(pred_mask_flattened, min=self.opt.epsilon, max=1-self.opt.epsilon)
 
                 
-                if not data['use_default_intrinstic']:
+                if not data['use_default_intrinsics']:
                     if labeled.sum() > 0:
                         loss = -torch.log(torch.gather(pred_mask_flattened[labeled], -1, gt_mask_flattened[labeled][..., None]))
                     else:
@@ -1462,7 +1462,8 @@ class Trainer(object):
         coords_torch, labels_torch = coords_torch[None,
                                                   :, :], labels_torch[None, :]
 
-        # decode
+        # decode 
+        self.sam_predictor.interm_features = None
         masks, iou_predictions, low_res_masks = self.sam_predictor.predict_torch(
             coords_torch, labels_torch,
             mask_input=mask_input_torch,
@@ -1947,7 +1948,7 @@ class Trainer(object):
                 if self.local_rank == 0:
                     metric_vals = []
                     for metric in self.metrics:
-                        if not loader._data.use_default_intrinstic:
+                        if not loader._data.use_default_intrinsics:
                             if isinstance(metric, MeanIoUMeter):
                                 pred_masks = preds.argmax(-1)
                                 metric_val = metric.update(pred_masks, truths)

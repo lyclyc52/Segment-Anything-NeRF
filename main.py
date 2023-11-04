@@ -4,7 +4,7 @@ import sys
 import os.path as osp
 
 from nerf.utils import *
-from segment_anything import build_sam, sam_model_registry_baseline, SamPredictor
+from segment_anything_hq import build_sam, sam_model_registry_baseline, SamPredictor
 import numpy as np
 
 # torch.autograd.set_detect_anomaly(True)
@@ -121,7 +121,7 @@ if __name__ == '__main__':
                         help='patch size in train sampling')
     parser.add_argument('--pose_jittering', action='store_true')
     parser.add_argument('--mask_folder_name', type=str,
-                        default='masks', help="mask folder name")
+                        default=None, help="mask folder name")
     
     parser.add_argument('--incoherent_uncertainty_weight', type=float, default=1,
                         help='uncertainty weight applied on the incoherent regions')
@@ -182,6 +182,10 @@ if __name__ == '__main__':
     # evaluation option
     parser.add_argument('--use_point', action='store_true',
                         help='use point to generate mask')
+    
+    parser.add_argument('--use_default_intrinsics', action='store_true',
+                        help='use default intrinsics when rendering')
+    
     parser.add_argument('--val_type', type=str, default='default', choices=['default', 'val_all', 'val_split'],
                         help='evaluate all images')
 
@@ -207,6 +211,11 @@ if __name__ == '__main__':
 
     parser.add_argument('--data_type', type=str, default='mip',
                         choices=['mip', 'lerf', 'llff', '3dfront', 'ctr', 'pano', 'lift'], help="dataset type")
+    
+    
+    parser.add_argument('--scene_name', type=str, default='garden', help="scene name")
+    parser.add_argument('--object_name', type=str, default='table_whole', help="scene name")  
+    
     
     opt = parser.parse_args()
 
@@ -278,7 +287,7 @@ if __name__ == '__main__':
                 if opt.with_mask:
                     trainer.metrics = [MeanIoUMeter()]
                 # blender has gt, so evaluate it.
-                trainer.evaluate(test_loader)
+                # trainer.evaluate(test_loader)
 
             trainer.test(test_loader, write_video=False)  # test and save video
 

@@ -5,18 +5,19 @@
         "garden",
         "kitchen",
         "room"
+        
+        
     ],
     "lerf":[
         "teatime",
-        "shoe_rack",
         "donuts",
         "espresso",
-        "waldo_kitchen"
+        "waldo_kitchen",
+        "shoe_rack"
     ],
 
     "llff": [
         "horns",
-        "fern",
         "fenceflower",
         "fortress",
         "colinepiano",

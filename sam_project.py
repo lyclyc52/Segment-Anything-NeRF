@@ -6,7 +6,7 @@ import cv2
 import imageio
 import tqdm
 import matplotlib.pyplot as plt
-from segment_anything import sam_model_registry, SamPredictor, sam_model_registry_baseline
+from segment_anything_hq import sam_model_registry, SamPredictor, sam_model_registry_baseline
 import torch.nn.functional as F
 import argparse
 import json
@@ -78,6 +78,7 @@ def main(args, pts_3D, input_label):
     frame_names = []
     for k in poses.keys():
         frame_names.append(k)
+    
     # print(frame_names)
     # exit()
 
@@ -96,10 +97,11 @@ def main(args, pts_3D, input_label):
     predictor = SamPredictor(sam)
 
 
-    if args.purpose == 'traing':
+    if args.purpose == 'train':
         rgb_name = os.path.join(frame_root, f'ngp_ep{args.epoch}_{frame_names[0]}_rgb.png')
     else:
         rgb_name = os.path.join(frame_root, f'{frame_names[0]}_rgb.png')
+    print(rgb_name)
     image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     predictor.set_image(image)
@@ -134,7 +136,10 @@ def main(args, pts_3D, input_label):
             feature_name = os.path.join(frame_root, f'{frame_names[i]}_sam.npy')
         image = cv2.imread(rgb_name, cv2.IMREAD_UNCHANGED)
         r = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
+        # if r.shape[0] != 512:
+        #     print(r.shape)
+        #     print(rgb_name)
+        # continue
         p,n = poses[frame_names[i]], intrinsics
         
         p = np.array(p).astype(np.float32)
@@ -509,8 +514,8 @@ if __name__ == '__main__':
     if args.use_nerf_feature:
         scene_object_file = 'nerf'
     args.output_root = os.path.join(args.output_root, args.scene_name, f'{args.purpose}_{args.scene_object}_{scene_object_file}')
-    if os.path.isdir( args.output_root):
-        shutil.rmtree( args.output_root)
+    # if os.path.isdir( args.output_root):
+    #     shutil.rmtree( args.output_root)
         
         
     # if os.path.isdir(args.output_root) and len(os.listdir(args.output_root)) != 0:

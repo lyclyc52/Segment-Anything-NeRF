@@ -24,7 +24,7 @@ with open(metadata_path) as f:
 
 for data_type in list(scene_dict.keys()):
     
-    data_type = 'lerf'
+    data_type = 'lift'
     
     
     scene_list = scene_dict[data_type]
@@ -32,7 +32,7 @@ for data_type in list(scene_dict.keys()):
     for scene_name in scene_list:
         
         
-        scene_name = 'donuts'
+        scene_name = 'scene0423_02'
         
         # print(scene_name)
         
@@ -45,7 +45,7 @@ for data_type in list(scene_dict.keys()):
                 
         for object_name in meta[scene_name]:           
             # object_name = 'bedside_table'
-            object_name = 'donut_1'
+            object_name = 'small_sofa'
             iters = 250
             rgb_similarity_iter=200
         
@@ -53,7 +53,7 @@ for data_type in list(scene_dict.keys()):
             # use more iterations if their are too many images
 
             ending = 'nerf'
-            use_rgb_loss = [False, True]
+            use_rgb_loss = [False]
             
             
             for use_loss in use_rgb_loss:
@@ -98,6 +98,8 @@ for data_type in list(scene_dict.keys()):
                         '--iters', str(iters),
                         '--mask_mlp_type default',
                         '--contract',
+                        '--scene_name', scene_name,
+                        '--object_name', object_name,
                         '--val_type val_split',
                         '--rgb_similarity_loss_weight 10', 
                         '--rgb_similarity_threshold 0.15',
@@ -112,5 +114,7 @@ for data_type in list(scene_dict.keys()):
                 os.system(cmd)
             
             break
+        break
+    break
 
                 

@@ -31,12 +31,12 @@ with open(metadata_path) as f:
     meta = json.load(f)
 
 
-scene_dict = {}
-scene_dict['lift'] = ['replica_room_0']
+# scene_dict = {}
+# scene_dict['lift'] = ['replica_room_0']
 
 for data_type in list(scene_dict.keys()):
     
-    # data_type = 'llff'
+    data_type = 'lift'
     
     
     scene_list = scene_dict[data_type]
@@ -44,7 +44,7 @@ for data_type in list(scene_dict.keys()):
     for scene_name in scene_list:
         
         
-        # scene_name = 'fenceflower'
+        scene_name = 'scene0423_02'
         
         # print(scene_name)
         
@@ -55,14 +55,14 @@ for data_type in list(scene_dict.keys()):
         scene_data_root = path.join(data_root, scene_name)
         
         for object_name in meta[scene_name]:
-        
+            object_name = 'small_sofa'
             ending = 'nerf'
             cur_scene_root = os.path.join(scene_root, scene_name)
             object_workspace = path.join(workspace_root, 'mask_nerf', f'{scene_name}-{object_name}-{ending}')
             mask_folder_name = f'train_{object_name}_{ending}'
             
-            with open(path.join(cur_scene_root, mask_folder_name, 'data_split.json')) as f:
-                eval_json = json.load(f)
+            # with open(path.join(cur_scene_root, mask_folder_name, 'data_split.json')) as f:
+            #     eval_json = json.load(f)
             # if 'use_default_intrinstic' not in eval_json or eval_json['use_default_intrinstic'] != 1:
             #     continue
             
@@ -78,7 +78,10 @@ for data_type in list(scene_dict.keys()):
                     '--val_type val_split',
                     '--with_mask',
                     '--contract', 
+                    '--object_name', object_name,
+                    '--scene_name', scene_name,
                     '--n_inst 2',
+                    '--use_default_intrinsics',
                     '--sam_use_view_direction', 
                     '--render_mask_instance_id -1',
                     '--return_extra'
@@ -88,6 +91,6 @@ for data_type in list(scene_dict.keys()):
 
             cmd = ' '.join(cmd)
             os.system(cmd)
-    #         break
-    #     break
-    # break
+            break
+        break
+    break
